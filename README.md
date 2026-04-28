@@ -1,23 +1,47 @@
-# JARVIS
+# 🤖 J.A.R.V.I.S
 
-Assistant IA personnel avec intégrations API, automatisations et
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active-success?style=for-the-badge)
+![License](https://img.shields.io/badge/License-Private-lightgrey?style=for-the-badge)
+![AI](https://img.shields.io/badge/AI-Assistant-purple?style=for-the-badge)
+
+Assistant IA personnel avec automatisations, intégrations API et
 interface locale.
 
-------------------------------------------------------------------------
-
-## Fonctionnalités
-
--   Agent IA principal
--   Gestion de mémoire
--   Intégrations API (Gemini, Groq, XAI, etc.)
--   Contrôle Home Assistant
--   Intégration Discord
--   Support Proxmox
--   Interface frontend + mobile
+Ce projet est basé sur le projet de TechEnClair :\
+https://www.techenclair.fr/pages/jarvis.html\
+Il a été repris, amélioré et adapté selon mes besoins.
 
 ------------------------------------------------------------------------
 
-## Installation
+## ✨ Aperçu
+
+JARVIS est un assistant IA modulaire capable de gérer des API, contrôler
+des services locaux et automatiser des tâches.
+
+------------------------------------------------------------------------
+
+## 🚀 Fonctionnalités
+
+-   🧠 Agent IA principal intelligent\
+-   💾 Système de mémoire\
+-   🔌 Intégrations API (Gemini, Groq, XAI, etc.)\
+-   🏠 Contrôle Home Assistant\
+-   💬 Bot Discord intégré\
+-   🖥️ Support Proxmox\
+-   📱 Interface web + mobile\
+-   ⚙️ Automatisation avancée
+
+------------------------------------------------------------------------
+
+## 🖼️ Interface
+
+Ajoute ici tes screenshots : - assets/dashboard.png -
+assets/interface.png
+
+------------------------------------------------------------------------
+
+## 📦 Installation
 
 ### 1. Cloner le projet
 
@@ -32,7 +56,7 @@ cd J.A.R.V.I.S
 pip install -r requirements.txt
 ```
 
-### 3. Lancer le projet
+### 3. Lancer JARVIS
 
 ``` bash
 bash start_jarvis.sh
@@ -40,55 +64,52 @@ bash start_jarvis.sh
 
 ------------------------------------------------------------------------
 
-## Configuration (.env)
+## ⚙️ Configuration
 
-Créer un fichier `.env` à la racine du projet :
+Créer un fichier `.env` :
 
-``` env
-GEMINI_API_KEY=VOTRE_CLE_ICI
-BLAGUES_API_TOKEN=VOTRE_TOKEN_ICI
-YOUTUBE_API_KEY=VOTRE_CLE_ICI
-XAI_API_KEY=VOTRE_CLE_ICI
+    GEMINI_API_KEY=VOTRE_CLE
+    BLAGUES_API_TOKEN=VOTRE_TOKEN
+    YOUTUBE_API_KEY=VOTRE_CLE
+    XAI_API_KEY=VOTRE_CLE
 
-HA_URL=http://homeassistant.local:8123
-HA_TOKEN=VOTRE_TOKEN_ICI
+    HA_URL=http://homeassistant.local:8123
+    HA_TOKEN=VOTRE_TOKEN
 
-SERPAPI_API_KEY=VOTRE_CLE_ICI
-GROQ_API_KEY=VOTRE_CLE_ICI
+    SERPAPI_API_KEY=VOTRE_CLE
+    GROQ_API_KEY=VOTRE_CLE
 
-PROXMOX_URL=https://proxmox.local:8006
-PROXMOX_TOKEN_ID=VOTRE_TOKEN_ID
-PROXMOX_TOKEN_SECRET=VOTRE_TOKEN_SECRET
-PROXMOX_VERIFY_SSL=false
+    PROXMOX_URL=https://proxmox.local:8006
+    PROXMOX_TOKEN_ID=VOTRE_ID
+    PROXMOX_TOKEN_SECRET=VOTRE_SECRET
+    PROXMOX_VERIFY_SSL=false
 
-DISCORD_OWNER_ID=VOTRE_ID_ICI
-DISCORD_CLIENT_ID=VOTRE_ID_ICI
-DISCORD_CLIENT_SECRET=VOTRE_SECRET_ICI
-DISCORD_REDIRECT_URI=http://localhost:8080/auth/discord/callback
+    DISCORD_OWNER_ID=VOTRE_ID
+    DISCORD_CLIENT_ID=VOTRE_ID
+    DISCORD_CLIENT_SECRET=VOTRE_SECRET
+    DISCORD_REDIRECT_URI=http://localhost:8080/auth/discord/callback
 
-JARVIS_SESSION_SECRET=VOTRE_SECRET_ICI
-```
+    JARVIS_SESSION_SECRET=VOTRE_SECRET
 
 ------------------------------------------------------------------------
 
-## Structure du projet
+## 🧱 Architecture
 
-    .
-    ├── backend/
-    ├── frontend/
-    ├── mobile/
-    ├── venv/
-    ├── jarvis_agent.py
-    ├── main2.py
-    ├── start_jarvis.sh
-    ├── requirements.txt
-    └── .env (local uniquement)
+    backend/
+    frontend/
+    mobile/
+    venv/
+    jarvis_agent.py
+    main2.py
+    start_jarvis.sh
+    requirements.txt
+    .env
 
 ------------------------------------------------------------------------
 
-## Sécurité
+## 🔒 Sécurité
 
--   Ne jamais push le fichier `.env`
+-   Ne jamais publier `.env`
 -   Ajouter au `.gitignore` :
 
 ```{=html}
@@ -100,6 +121,13 @@ JARVIS_SESSION_SECRET=VOTRE_SECRET_ICI
 
 ------------------------------------------------------------------------
 
-## Auteur
+## 🧠 Origine du projet
+
+Basé sur : https://www.techenclair.fr/pages/jarvis.html\
+Projet repris, amélioré et personnalisé.
+
+------------------------------------------------------------------------
+
+## 👤 Auteur
 
 draft-yt-gaming
