@@ -35,6 +35,8 @@ import io
 import urllib3
 import secrets
 from functools import wraps
+from contextvars import ContextVar
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from flask import Flask, jsonify, redirect, request as flask_request, send_from_directory, session
 try:
     import cv2
@@ -68,6 +70,13 @@ SETTINGS_FILE = BASE_DIR / "jarvis_runtime_settings.json"
 GENERATED_IMAGES_DIR = BASE_DIR / "generated_images"
 DEBUG_LOG_BUFFER = deque(maxlen=600)
 DEBUG_LOG_LOCK = threading.Lock()
+COMMAND_CONTEXT = ContextVar("jarvis_command_context", default={"user": None, "owner": False})
+WS_AUTH_SALT = "jarvis-ws-auth"
+SERVICE_HEALTH_CACHE = {"timestamp": 0.0, "data": {}}
+SERVICE_HEALTH_TTL = 30.0
+HTTP_CLIENT_EVENTS = {}
+HTTP_CLIENT_EVENTS_LOCK = threading.Lock()
+COMMAND_HTTP_CLIENT_ID = ContextVar("jarvis_http_client_id", default="")
 
 
 class DebugTeeStream:
@@ -150,6 +159,10 @@ DEFAULT_SETTINGS = {
     "HOME_LOCATION_NAME": os.getenv("HOME_LOCATION_NAME", ""),
     "SERPAPI_API_KEY": os.getenv("SERPAPI_API_KEY", ""),
     "GROQ_API_KEY": os.getenv("GROQ_API_KEY", ""),
+    "EMBY_URL": os.getenv("EMBY_URL", ""),
+    "EMBY_API_KEY": os.getenv("EMBY_API_KEY", ""),
+    "EMBY_USER_ID": os.getenv("EMBY_USER_ID", ""),
+    "EMBY_USERNAME": os.getenv("EMBY_USERNAME", ""),
     "PROXMOX_URL": os.getenv("PROXMOX_URL", ""),
     "PROXMOX_TOKEN_ID": os.getenv("PROXMOX_TOKEN_ID", ""),
     "PROXMOX_TOKEN_SECRET": os.getenv("PROXMOX_TOKEN_SECRET", ""),
@@ -170,6 +183,7 @@ SENSITIVE_SETTINGS = {
     "HA_TOKEN",
     "SERPAPI_API_KEY",
     "GROQ_API_KEY",
+    "EMBY_API_KEY",
     "PROXMOX_TOKEN_SECRET",
     "DISCORD_CLIENT_SECRET",
     "JARVIS_SESSION_SECRET",
@@ -207,6 +221,8 @@ WS_PORT = int(os.getenv("JARVIS_WS_PORT", "8765"))
 HTTP_PORT = int(os.getenv("JARVIS_HTTP_PORT", "8080"))
 JARVIS_HEADLESS = env_flag("JARVIS_HEADLESS", False)
 GEMINI_API_KEY = ""
+GEMINI_API_KEYS = []
+GEMINI_MODEL_KEY_BLOCKED_UNTIL = {}
 BLAGUES_API_TOKEN = ""
 YOUTUBE_API_KEY = ""
 XAI_API_KEY = ""
@@ -216,6 +232,10 @@ HA_WEATHER_ENTITY = ""
 HOME_LOCATION_NAME = ""
 SERPAPI_API_KEY = ""
 GROQ_API_KEY = ""
+EMBY_URL = ""
+EMBY_API_KEY = ""
+EMBY_USER_ID = ""
+EMBY_USERNAME = ""
 PROXMOX_URL = ""
 PROXMOX_TOKEN_ID = ""
 PROXMOX_TOKEN_SECRET = ""
@@ -233,27 +253,30 @@ XAI_CONFIGURED = False
 HA_CONFIGURED = False
 SERPAPI_CONFIGURED = False
 GROQ_CONFIGURED = False
+EMBY_CONFIGURED = False
 PROXMOX_CONFIGURED = False
 DISCORD_CONFIGURED = False
 client = None
+GEMINI_CLIENTS = []
 blagues_client = None
 grok_client = None
 groq_client = None
 app = None
 
 def refresh_runtime_config():
-    global ASSISTANT_NAME, GEMINI_API_KEY, BLAGUES_API_TOKEN, YOUTUBE_API_KEY, XAI_API_KEY
+    global ASSISTANT_NAME, GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_MODEL_KEY_BLOCKED_UNTIL, BLAGUES_API_TOKEN, YOUTUBE_API_KEY, XAI_API_KEY
     global HA_URL, HA_TOKEN, HA_WEATHER_ENTITY, HOME_LOCATION_NAME, SERPAPI_API_KEY, GROQ_API_KEY
+    global EMBY_URL, EMBY_API_KEY, EMBY_USER_ID, EMBY_USERNAME
     global PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_VERIFY_SSL
     global DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI
     global JARVIS_SESSION_SECRET
     global GEMINI_CONFIGURED, BLAGUES_CONFIGURED, YOUTUBE_CONFIGURED, XAI_CONFIGURED, HA_CONFIGURED
-    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
-    global client, blagues_client, grok_client, groq_client, HA_HEADERS
+    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
+    global client, GEMINI_CLIENTS, blagues_client, grok_client, groq_client, HA_HEADERS
 
     settings = RUNTIME_SETTINGS
     ASSISTANT_NAME = settings.get("assistant_name", "J.A.R.V.I.S") or "J.A.R.V.I.S"
-    GEMINI_API_KEY = settings.get("GEMINI_API_KEY", "")
+    GEMINI_API_KEY = str(settings.get("GEMINI_API_KEY", "")).strip()
     BLAGUES_API_TOKEN = settings.get("BLAGUES_API_TOKEN", "")
     YOUTUBE_API_KEY = settings.get("YOUTUBE_API_KEY", "")
     XAI_API_KEY = settings.get("XAI_API_KEY", "")
@@ -263,6 +286,10 @@ def refresh_runtime_config():
     HOME_LOCATION_NAME = settings.get("HOME_LOCATION_NAME", "")
     SERPAPI_API_KEY = settings.get("SERPAPI_API_KEY", "")
     GROQ_API_KEY = settings.get("GROQ_API_KEY", "")
+    EMBY_URL = str(settings.get("EMBY_URL", "")).strip()
+    EMBY_API_KEY = str(settings.get("EMBY_API_KEY", "")).strip()
+    EMBY_USER_ID = str(settings.get("EMBY_USER_ID", "")).strip()
+    EMBY_USERNAME = str(settings.get("EMBY_USERNAME", "")).strip()
     PROXMOX_URL = settings.get("PROXMOX_URL", "")
     PROXMOX_TOKEN_ID = settings.get("PROXMOX_TOKEN_ID", "")
     PROXMOX_TOKEN_SECRET = settings.get("PROXMOX_TOKEN_SECRET", "")
@@ -276,13 +303,15 @@ def refresh_runtime_config():
     if not PROXMOX_VERIFY_SSL:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    GEMINI_CONFIGURED = env_value_is_configured(GEMINI_API_KEY)
+    GEMINI_API_KEYS = [key for key in re.split(r"[\n,;]+", GEMINI_API_KEY) if env_value_is_configured(key.strip()) for key in [key.strip()]]
+    GEMINI_CONFIGURED = bool(GEMINI_API_KEYS)
     BLAGUES_CONFIGURED = env_value_is_configured(BLAGUES_API_TOKEN)
     YOUTUBE_CONFIGURED = env_value_is_configured(YOUTUBE_API_KEY)
     XAI_CONFIGURED = env_value_is_configured(XAI_API_KEY)
     HA_CONFIGURED = env_value_is_configured(HA_URL) and env_value_is_configured(HA_TOKEN)
     SERPAPI_CONFIGURED = env_value_is_configured(SERPAPI_API_KEY)
     GROQ_CONFIGURED = env_value_is_configured(GROQ_API_KEY)
+    EMBY_CONFIGURED = env_value_is_configured(EMBY_URL) and env_value_is_configured(EMBY_API_KEY)
     PROXMOX_CONFIGURED = all(
         env_value_is_configured(v)
         for v in (PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET)
@@ -292,7 +321,13 @@ def refresh_runtime_config():
         for v in (DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET)
     )
 
-    client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_CONFIGURED else None
+    GEMINI_CLIENTS = [(key, genai.Client(api_key=key)) for key in GEMINI_API_KEYS] if GEMINI_CONFIGURED else []
+    GEMINI_MODEL_KEY_BLOCKED_UNTIL = {
+        blocked_key: blocked_until
+        for blocked_key, blocked_until in GEMINI_MODEL_KEY_BLOCKED_UNTIL.items()
+        if blocked_key[0] in GEMINI_API_KEYS
+    }
+    client = GEMINI_CLIENTS[0][1] if GEMINI_CLIENTS else None
     blagues_client = BlaguesAPI(BLAGUES_API_TOKEN) if (BLAGUES_CONFIGURED and BlaguesAPI) else None
     grok_client = OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1") if XAI_CONFIGURED else None
     groq_client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1") if GROQ_CONFIGURED else None
@@ -324,15 +359,181 @@ def get_service_config_flags():
         "home_assistant": HA_CONFIGURED,
         "serpapi": SERPAPI_CONFIGURED,
         "groq": GROQ_CONFIGURED,
+        "emby": EMBY_CONFIGURED,
         "proxmox": PROXMOX_CONFIGURED,
         "discord": DISCORD_CONFIGURED,
     }
+
+
+def _status_payload(state, detail=""):
+    return {"state": state, "detail": detail}
+
+
+def _service_ok(response):
+    return 200 <= response.status_code < 300
+
+
+def _test_gemini_status():
+    if not GEMINI_CONFIGURED:
+        return _status_payload("missing")
+    last_detail = ""
+    for key in GEMINI_API_KEYS:
+        try:
+            r = requests.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": key, "pageSize": 1},
+                timeout=4,
+            )
+            if _service_ok(r):
+                return _status_payload("ok", f"HTTP {r.status_code} via {mask_secret(key)}")
+            last_detail = f"HTTP {r.status_code} via {mask_secret(key)}"
+        except Exception as e:
+            last_detail = f"{e} via {mask_secret(key)}"
+    return _status_payload("error", last_detail)
+
+
+def _test_youtube_status():
+    if not YOUTUBE_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        r = requests.get(
+            "https://www.googleapis.com/youtube/v3/search",
+            params={"part": "snippet", "q": "jarvis", "type": "video", "maxResults": 1, "key": YOUTUBE_API_KEY},
+            timeout=4,
+        )
+        return _status_payload("ok" if _service_ok(r) else "error", f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def _test_xai_status():
+    if not XAI_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        r = requests.get(
+            "https://api.x.ai/v1/models",
+            headers={"Authorization": f"Bearer {XAI_API_KEY}"},
+            timeout=4,
+        )
+        return _status_payload("ok" if _service_ok(r) else "error", f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def _test_serpapi_status():
+    if not SERPAPI_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        r = requests.get(
+            "https://serpapi.com/account.json",
+            params={"api_key": SERPAPI_API_KEY},
+            timeout=4,
+        )
+        return _status_payload("ok" if _service_ok(r) else "error", f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def _test_groq_status():
+    if not GROQ_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        r = requests.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            timeout=4,
+        )
+        return _status_payload("ok" if _service_ok(r) else "error", f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def _test_home_assistant_status():
+    if not HA_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        r = requests.get(
+            f"{HA_URL.rstrip('/')}/api/",
+            headers={"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"},
+            timeout=4,
+        )
+        return _status_payload("ok" if _service_ok(r) else "error", f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def _test_emby_status():
+    if not EMBY_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        user_id = emby_resolve_user_id()
+        if not user_id:
+            return _status_payload("error", "Utilisateur Emby introuvable")
+        r = requests.get(
+            f"{EMBY_URL.rstrip('/')}/emby/Users/{user_id}",
+            params={"api_key": EMBY_API_KEY},
+            timeout=4,
+        )
+        return _status_payload("ok" if _service_ok(r) else "error", f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def _test_proxmox_status():
+    if not PROXMOX_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        r = requests.get(
+            f"{PROXMOX_URL.rstrip('/')}/api2/json/version",
+            headers={
+                "Authorization": f"PVEAPIToken={PROXMOX_TOKEN_ID}={PROXMOX_TOKEN_SECRET}",
+                "Accept": "application/json",
+            },
+            timeout=4,
+            verify=PROXMOX_VERIFY_SSL,
+        )
+        return _status_payload("ok" if _service_ok(r) else "error", f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def _test_discord_status():
+    if not DISCORD_CONFIGURED:
+        return _status_payload("missing")
+    try:
+        r = requests.get("https://discord.com/api/v10/applications/@me", timeout=4)
+        return _status_payload("ok" if r.status_code in (401, 403) else ("error" if r.status_code >= 500 else "ok"), f"HTTP {r.status_code}")
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
+def get_service_health_flags(force_refresh=False):
+    now = time.time()
+    cached = SERVICE_HEALTH_CACHE.get("data") or {}
+    if not force_refresh and cached and now - SERVICE_HEALTH_CACHE.get("timestamp", 0.0) < SERVICE_HEALTH_TTL:
+        return cached
+
+    statuses = {
+        "gemini": _test_gemini_status(),
+        "youtube": _test_youtube_status(),
+        "xai": _test_xai_status(),
+        "home_assistant": _test_home_assistant_status(),
+        "serpapi": _test_serpapi_status(),
+        "groq": _test_groq_status(),
+        "emby": _test_emby_status(),
+        "proxmox": _test_proxmox_status(),
+        "discord": _test_discord_status(),
+    }
+    SERVICE_HEALTH_CACHE["timestamp"] = now
+    SERVICE_HEALTH_CACHE["data"] = statuses
+    return statuses
 
 def get_public_runtime_settings():
     return {
         "assistant_name": ASSISTANT_NAME,
         "discord_owner_id": DISCORD_OWNER_ID,
         "config_flags": get_service_config_flags(),
+        "service_health": get_service_health_flags(),
     }
 
 def get_private_runtime_settings():
@@ -348,6 +549,10 @@ def get_private_runtime_settings():
         "HOME_LOCATION_NAME": HOME_LOCATION_NAME,
         "SERPAPI_API_KEY": SERPAPI_API_KEY,
         "GROQ_API_KEY": GROQ_API_KEY,
+        "EMBY_URL": EMBY_URL,
+        "EMBY_API_KEY": EMBY_API_KEY,
+        "EMBY_USER_ID": EMBY_USER_ID,
+        "EMBY_USERNAME": EMBY_USERNAME,
         "PROXMOX_URL": PROXMOX_URL,
         "PROXMOX_TOKEN_ID": PROXMOX_TOKEN_ID,
         "PROXMOX_TOKEN_SECRET": PROXMOX_TOKEN_SECRET,
@@ -378,9 +583,209 @@ def owner_auth_required():
         return wrapper
     return decorator
 
+
+def build_command_context(auth_user=None, client_id=""):
+    user = auth_user or {}
+    owner = bool(user and str(user.get("id", "")) == DISCORD_OWNER_ID)
+    return {
+        "user": user if owner else None,
+        "owner": owner,
+        "client_id": str(client_id or "").strip(),
+    }
+
+
+def get_current_command_context():
+    return COMMAND_CONTEXT.get() or {"user": None, "owner": False, "client_id": ""}
+
+
+def current_user_is_owner():
+    return bool(get_current_command_context().get("owner"))
+
+
+def get_current_authenticated_user():
+    return get_current_command_context().get("user") or {}
+
+
+def get_current_client_id():
+    return str(get_current_command_context().get("client_id", "") or "").strip()
+
+
+def get_current_memory_scope():
+    user = get_current_authenticated_user()
+    user_id = str(user.get("id", "")).strip()
+    if user_id:
+        return f"discord:{user_id}"
+    client_id = get_current_client_id()
+    if client_id:
+        return f"client:{client_id}"
+    return "client:anonymous"
+
+
+def get_current_memory_label():
+    if current_user_is_owner():
+        display_name = get_current_user_display_name()
+        if display_name:
+            return display_name
+        user = get_current_authenticated_user()
+        return str(user.get("id", "proprietaire"))
+    client_id = get_current_client_id()
+    if client_id:
+        return f"visiteur {client_id[:8]}"
+    return "visiteur anonyme"
+
+
+def get_current_user_display_name():
+    user = get_current_authenticated_user()
+    for key in ("global_name", "username"):
+        value = str(user.get(key, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def issue_ws_auth_token(user):
+    if not user:
+        return ""
+    serializer = URLSafeTimedSerializer(JARVIS_SESSION_SECRET or "jarvis")
+    payload = {
+        "id": str(user.get("id", "")),
+        "username": user.get("username", ""),
+        "global_name": user.get("global_name", ""),
+    }
+    return serializer.dumps(payload, salt=WS_AUTH_SALT)
+
+
+def read_ws_auth_token(token, max_age=43200):
+    if not token:
+        return None
+    serializer = URLSafeTimedSerializer(JARVIS_SESSION_SECRET or "jarvis")
+    try:
+        data = serializer.loads(token, salt=WS_AUTH_SALT, max_age=max_age)
+    except (BadSignature, SignatureExpired, TypeError, ValueError):
+        return None
+    if str(data.get("id", "")) != DISCORD_OWNER_ID:
+        return None
+    return {
+        "id": str(data.get("id", "")),
+        "username": data.get("username", ""),
+        "global_name": data.get("global_name", ""),
+    }
+
+
+def command_access_denied(feature_name):
+    return (
+        f"{ASSISTANT_NAME} reste neutre tant que le compte Discord proprietaire n'est pas connecte. "
+        f"L'acces a {feature_name} est reserve au proprietaire autorise."
+    )
+
+
+def action_requires_owner(action):
+    return bool(action) and (action.startswith("ha_") or action.startswith("proxmox_") or action.startswith("emby_"))
+
+
+def personalize_output_text(text):
+    if not isinstance(text, str) or not text:
+        return text
+
+    result = text
+    display_name = get_current_user_display_name() if current_user_is_owner() else ""
+    if display_name:
+        result = re.sub(r"\bTom\b", display_name, result)
+    else:
+        result = re.sub(r"\b(Bonjour|Salut|Bonsoir)\s+Tom\b", r"\1", result, flags=re.IGNORECASE)
+        result = re.sub(r"(?<=,)\s*Tom\b", "", result)
+        result = re.sub(r"\bTom\b(?=[.!?])", "", result)
+        result = re.sub(r"\bTom\b", "", result)
+        result = re.sub(r"\s{2,}", " ", result)
+        result = re.sub(r"\s+([,.!?])", r"\1", result)
+        result = re.sub(r",\s*,", ", ", result)
+        result = result.strip()
+
+    return result
+
 MODELS_LIST     = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
 CHOSEN_MODEL    = MODELS_LIST[0]
 GEMINI_QUOTA_BLOCKED_UNTIL = 0.0
+
+
+def mask_secret(value, keep=4):
+    value = str(value or "").strip()
+    if len(value) <= keep:
+        return value
+    return f"...{value[-keep:]}"
+
+
+def _gemini_block_key(api_key, model):
+    return (api_key, model)
+
+
+def gemini_available_clients(model):
+    now = time.time()
+    available = []
+    blocked = []
+    for key, gemini_client in GEMINI_CLIENTS:
+        blocked_until = GEMINI_MODEL_KEY_BLOCKED_UNTIL.get(_gemini_block_key(key, model), 0.0)
+        if blocked_until > now:
+            blocked.append((blocked_until, key, gemini_client))
+        else:
+            available.append((key, gemini_client))
+    if available:
+        return available
+    blocked.sort(key=lambda item: item[0])
+    return [(key, gemini_client) for _, key, gemini_client in blocked]
+
+
+def gemini_mark_failure(api_key, model, error):
+    global GEMINI_QUOTA_BLOCKED_UNTIL
+    if erreur_quota_gemini(error):
+        blocked_until = time.time() + extraire_retry_quota_secondes(error)
+        block_key = _gemini_block_key(api_key, model)
+        GEMINI_MODEL_KEY_BLOCKED_UNTIL[block_key] = max(GEMINI_MODEL_KEY_BLOCKED_UNTIL.get(block_key, 0.0), blocked_until)
+        GEMINI_QUOTA_BLOCKED_UNTIL = max(GEMINI_QUOTA_BLOCKED_UNTIL, blocked_until)
+
+
+def _gemini_generate_blocking(model, contents, config=None):
+    if not GEMINI_CLIENTS:
+        raise Exception("Gemini non configure (aucune cle API valide)")
+
+    now = time.time()
+    clients = gemini_available_clients(model)
+    earliest_retry = None
+    last_err = None
+
+    for api_key, gemini_client in clients:
+        blocked_until = GEMINI_MODEL_KEY_BLOCKED_UNTIL.get(_gemini_block_key(api_key, model), 0.0)
+        if blocked_until > now:
+            earliest_retry = blocked_until if earliest_retry is None else min(earliest_retry, blocked_until)
+            continue
+        try:
+            return gemini_client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as e:
+            print(f"[GEMINI] Cle {mask_secret(api_key)} en echec sur {model} : {e}")
+            gemini_mark_failure(api_key, model, e)
+            last_err = e
+            blocked_until = GEMINI_MODEL_KEY_BLOCKED_UNTIL.get(_gemini_block_key(api_key, model), 0.0)
+            if blocked_until > time.time():
+                earliest_retry = blocked_until if earliest_retry is None else min(earliest_retry, blocked_until)
+            continue
+
+    if last_err:
+        raise last_err
+    if earliest_retry is not None:
+        attente = int(max(1, earliest_retry - time.time()))
+        raise Exception(f"Toutes les cles Gemini sont temporairement suspendues, reessayez dans {attente}s")
+    raise Exception("Toutes les cles Gemini ont echoue")
+
+
+async def gemini_generate_with_failover(model, contents, config=None, timeout=12.0):
+    return await asyncio.wait_for(
+        asyncio.to_thread(_gemini_generate_blocking, model, contents, config),
+        timeout=timeout,
+    )
 
 # Ollama (LLMs locaux — fallback 100% offline)
 OLLAMA_URL      = "http://127.0.0.1:11434"
@@ -630,27 +1035,73 @@ def chercher_fichier(nom, chemin=None):
 # MEMOIRE PERSISTANTE
 # ==========================================
 MEMOIRE_FILE = "jarvis_memoire.json"
+MEMOIRE_VERSION = 2
 
-def charger_memoire():
-    if os.path.exists(MEMOIRE_FILE):
-        try:
-            with open(MEMOIRE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
 
-def sauvegarder_memoire(memoire):
+def _legacy_memory_default_scope():
+    owner_id = str(DISCORD_OWNER_ID or "").strip()
+    if owner_id:
+        return f"discord:{owner_id}"
+    return "client:anonymous"
+
+
+def charger_memoire_complete():
+    if not os.path.exists(MEMOIRE_FILE):
+        return {"version": MEMOIRE_VERSION, "users": {}}
+    try:
+        with open(MEMOIRE_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return {"version": MEMOIRE_VERSION, "users": {}}
+
+    if isinstance(raw, dict) and isinstance(raw.get("users"), dict):
+        return {
+            "version": int(raw.get("version", MEMOIRE_VERSION) or MEMOIRE_VERSION),
+            "users": raw.get("users", {}),
+        }
+
+    if isinstance(raw, dict):
+        return {
+            "version": MEMOIRE_VERSION,
+            "users": {
+                _legacy_memory_default_scope(): raw,
+            },
+        }
+
+    return {"version": MEMOIRE_VERSION, "users": {}}
+
+
+def sauvegarder_memoire_complete(memoire_complete):
+    payload = {
+        "version": MEMOIRE_VERSION,
+        "users": memoire_complete.get("users", {}),
+    }
     try:
         with open(MEMOIRE_FILE, "w", encoding="utf-8") as f:
-            json.dump(memoire, f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Erreur sauvegarde memoire : {e}")
 
+
+def charger_memoire(scope=None):
+    memoire_complete = charger_memoire_complete()
+    target_scope = scope or get_current_memory_scope()
+    memoire = memoire_complete.get("users", {}).get(target_scope, {})
+    return memoire if isinstance(memoire, dict) else {}
+
+
+def sauvegarder_memoire(memoire, scope=None):
+    memoire_complete = charger_memoire_complete()
+    target_scope = scope or get_current_memory_scope()
+    memoire_complete.setdefault("users", {})[target_scope] = memoire
+    sauvegarder_memoire_complete(memoire_complete)
+
+
 def ajouter_memoire(cle, valeur):
-    memoire      = charger_memoire()
+    memoire = charger_memoire()
     memoire[cle] = {"valeur": valeur, "timestamp": time.strftime("%d/%m/%Y %H:%M")}
     sauvegarder_memoire(memoire)
+
 
 def supprimer_memoire(cle):
     memoire = charger_memoire()
@@ -660,11 +1111,12 @@ def supprimer_memoire(cle):
         return True
     return False
 
+
 def construire_contexte_memoire():
     memoire = charger_memoire()
     if not memoire:
         return ""
-    lignes = ["MEMOIRE PERSISTANTE :"]
+    lignes = [f"MEMOIRE PERSISTANTE ({get_current_memory_label()}) :"]
     for cle, data in memoire.items():
         lignes.append(f"  - {cle} : {data['valeur']} (note le {data['timestamp']})")
     return "\n".join(lignes)
@@ -688,9 +1140,10 @@ async def ws_handler(websocket):
                 data = json.loads(message)
                 if data.get("type") == "mobile_command":
                     texte = data.get("text", "").strip()
+                    auth_user = read_ws_auth_token(data.get("auth_token", ""))
                     if texte:
                         print(f"[MOBILE] Commande recue : {texte}")
-                        asyncio.ensure_future(traiter_reponse_ia(texte, mobile_ws=websocket))
+                        asyncio.ensure_future(traiter_reponse_ia(texte, mobile_ws=websocket, auth_user=auth_user, http_client_id=data.get("client_id", "")))
                 elif data.get("type") == "stop_audio":
                     global STOP_PARLER
                     STOP_PARLER = True
@@ -712,17 +1165,41 @@ async def ws_handler(websocket):
         CONNECTED_CLIENTS.discard(websocket)
         print(f"[WEB] Interface deconnectee (Clients actifs: {len(CONNECTED_CLIENTS)})")
 
+def queue_http_client_event(client_id, payload):
+    if not client_id:
+        return
+    with HTTP_CLIENT_EVENTS_LOCK:
+        HTTP_CLIENT_EVENTS.setdefault(client_id, []).append(payload)
+
+
+def pop_http_client_events(client_id):
+    if not client_id:
+        return []
+    with HTTP_CLIENT_EVENTS_LOCK:
+        return HTTP_CLIENT_EVENTS.pop(client_id, [])
+
+
 async def send_web_state(state):
+    client_id = COMMAND_HTTP_CLIENT_ID.get()
+    if client_id:
+        queue_http_client_event(client_id, {"action": "set_state", "state": state})
     if CONNECTED_CLIENTS:
         message = json.dumps({"action": "set_state", "state": state})
-        await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS])
+        await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
 
 async def send_web_volume(volume):
+    client_id = COMMAND_HTTP_CLIENT_ID.get()
+    rounded = round(volume, 3)
+    if client_id:
+        queue_http_client_event(client_id, {"action": "set_volume", "volume": rounded})
     if CONNECTED_CLIENTS:
-        message = json.dumps({"action": "set_volume", "volume": round(volume, 3)})
+        message = json.dumps({"action": "set_volume", "volume": rounded})
         await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
 
 async def send_web_action(action, **payload):
+    client_id = COMMAND_HTTP_CLIENT_ID.get()
+    if client_id:
+        queue_http_client_event(client_id, {"action": action, **payload})
     if CONNECTED_CLIENTS:
         message = json.dumps({"action": action, **payload})
         await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
@@ -968,7 +1445,20 @@ def youtube_trouver_video_id(recherche):
 # ==========================================
 def construire_system_prompt():
     contexte_memoire = construire_contexte_memoire()
+    owner_mode = current_user_is_owner()
+    owner_name = get_current_user_display_name()
+    identity_directive = (
+        f"L'utilisateur authentifie actuellement est {owner_name}. Adresse-toi toujours a lui par son nom de compte Discord, {owner_name}, et n'utilise jamais le prenom Tom dans la conversation."
+        if owner_mode and owner_name
+        else "Aucun compte Discord proprietaire n'est authentifie pour cette conversation. Reste neutre, n'utilise jamais le prenom Tom et n'emploie aucun nom propre pour t'adresser a l'utilisateur."
+    )
+    access_directive = (
+        "Les acces Pronote, Home Assistant et Proxmox sont autorises pour cette conversation."
+        if owner_mode
+        else "Pronote, Home Assistant et Proxmox sont interdits tant que le proprietaire autorise n'est pas connecte. Refuse poliment ces demandes sans generer de JSON pour ces systemes."
+    )
     base = (
+        identity_directive + "\n" + access_directive + "\n\n" +
         "Tu es JARVIS, une IA sophistiquée, élégante et experte mondiale. Tom est ton créateur. "
         "Tu possèdes une expertise de niveau professionnel dans les domaines suivants :\n"
         "- Mathématiques : Tu es un mathématicien hors pair. Pour les problèmes complexes, fournis des solutions détaillées étape par étape, explique les théorèmes et aide Tom à comprendre la logique mathématique.\n"
@@ -984,7 +1474,8 @@ def construire_system_prompt():
         "- Reste poli mais garde une touche de sarcasme affectueux propre à ton personnage.\n\n"
         + CREATOR_INFO
     )
-    base += (
+    if owner_mode:
+        base += (
         "\n\nTu es connecte a Home Assistant, la domotique de Tom.\n"
         "Quand Tom parle de lumieres, prises, chauffage, temperature, "
         "scenes ou alarme, tu DOIS generer une commande JSON.\n"
@@ -1019,7 +1510,18 @@ def construire_system_prompt():
         '{"action": "deplacer_fichier", "fichier": "photo.jpg", "destination": "Images"}\n'
         '{"action": "chercher_fichier", "nom": "rapport"}\n\n'
     )
-    base += (
+    if owner_mode:
+        base += (
+        "\n\nEMBY :\n"
+        '{"action": "emby_status"}\n'
+        '{"action": "emby_current"}\n'
+        '{"action": "emby_continue"}\n'
+        '{"action": "emby_latest"}\n'
+        '{"action": "emby_library"}\n'
+        "Utilise emby_current pour les lectures en cours, emby_continue pour les lectures a reprendre, emby_latest pour les derniers ajouts et emby_library pour une vue d ensemble de la bibliotheque Emby.\n\n"
+    )
+    if owner_mode:
+        base += (
         "\n\nPROXMOX :\n"
         '{"action": "proxmox_statut"}\n'
         '{"action": "proxmox_vms"}\n'
@@ -1327,7 +1829,7 @@ async def jarvis_vision_cliquer(instruction):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description courte de l'élément\"}\n"
             "Les coordonnées sont normalisées de 0 à 1000 (0=coin haut-gauche, 1000=coin bas-droit)."
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        response = await gemini_generate_with_failover(model=CHOSEN_MODEL, contents=[prompt_vision, img], timeout=15.0)
         rep_text = response.text.strip()
         print(f"[VISION] Gemini a renvoyé : {rep_text}")
         start = rep_text.find('{')
@@ -1385,7 +1887,7 @@ async def jarvis_vision_ecrire(instruction, texte_a_taper):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description du champ\"}\n"
             "Exemple : {\"box\": [250, 480, 290, 520], \"description\": \"champ de recherche Google\"}"
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        response = await gemini_generate_with_failover(model=CHOSEN_MODEL, contents=[prompt_vision, img], timeout=15.0)
         rep_text = response.text.strip()
         start = rep_text.find('{')
         end = rep_text.rfind('}')
@@ -1443,7 +1945,7 @@ async def jarvis_vision_rechercher_sur_site(texte_recherche):
             "{\"box\": [ymin, xmin, ymax, xmax], \"description\": \"description de la barre trouvée\"}\n"
             "Exemple : {\"box\": [48, 220, 78, 820], \"description\": \"barre de recherche YouTube\"}"
         )
-        response = client.models.generate_content(model=CHOSEN_MODEL, contents=[prompt_vision, img])
+        response = await gemini_generate_with_failover(model=CHOSEN_MODEL, contents=[prompt_vision, img], timeout=15.0)
         rep_text = response.text.strip()
         start = rep_text.find('{')
         end = rep_text.rfind('}')
@@ -2284,6 +2786,8 @@ def proxmox_parser_commande_directe(texte):
         return None
 
     if any(mot in t for mot in ["administrateur", "administrator", "permission admin", "perm admin", "droit admin", "droits admin", "role admin", "rôle admin"]):
+        if not current_user_is_owner():
+            return command_access_denied("Proxmox")
         if (
             any(mot in t for mot in ["utilisateur", "user", "luser", "compte"]) or
             re.search(r"\b(?:a|à)\b\s+[a-z0-9_.@-]+", t)
@@ -2499,6 +3003,139 @@ def proxmox_resume_vms():
     if len(guests) > 12:
         lignes.append(f"Et {len(guests) - 12} autre(s) instance(s).")
     return " ".join(lignes)
+
+def emby_est_configure():
+    return EMBY_CONFIGURED
+
+
+def emby_api_get(path, params=None):
+    if not emby_est_configure():
+        raise RuntimeError("Emby n'est pas configure")
+    merged = {"api_key": EMBY_API_KEY}
+    if params:
+        merged.update({k: v for k, v in params.items() if v not in (None, "")})
+    response = requests.get(f"{EMBY_URL.rstrip('/')}/emby{path}", params=merged, timeout=8)
+    response.raise_for_status()
+    return response.json()
+
+
+def emby_resolve_user_id():
+    if not emby_est_configure():
+        return None
+    if EMBY_USER_ID:
+        return EMBY_USER_ID
+    if not EMBY_USERNAME:
+        return None
+    try:
+        payload = emby_api_get("/Users/Query", params={"SearchTerm": EMBY_USERNAME})
+    except Exception:
+        return None
+    for user in payload.get("Items", []):
+        if str(user.get("Name", "")).strip().lower() == EMBY_USERNAME.strip().lower():
+            return user.get("Id")
+    items = payload.get("Items", [])
+    return items[0].get("Id") if items else None
+
+
+def _emby_user_label():
+    return EMBY_USERNAME or "votre compte Emby"
+
+
+def _emby_item_label(item):
+    if not isinstance(item, dict):
+        return "contenu inconnu"
+    title = item.get("Name") or item.get("SeriesName") or item.get("Album") or item.get("Id") or "contenu inconnu"
+    if item.get("Type") == "Episode" and item.get("SeriesName"):
+        season = item.get("ParentIndexNumber")
+        episode = item.get("IndexNumber")
+        suffix = []
+        if season is not None:
+            suffix.append(f"saison {season}")
+        if episode is not None:
+            suffix.append(f"episode {episode}")
+        if suffix:
+            return f"{item.get('SeriesName')} {', '.join(suffix)} : {item.get('Name')}"
+    year = item.get("ProductionYear")
+    if year and item.get("Type") == "Movie":
+        return f"{title} ({year})"
+    return str(title)
+
+
+def emby_resume_en_cours():
+    if not current_user_is_owner():
+        return command_access_denied("Emby")
+    user_id = emby_resolve_user_id()
+    if not user_id:
+        return "Je ne trouve pas l'utilisateur Emby configure. Renseignez EMBY_USER_ID ou EMBY_USERNAME dans le dashboard."
+    try:
+        sessions = emby_api_get("/Sessions")
+    except Exception as e:
+        return f"Je n'arrive pas a lire les sessions Emby pour le moment. {e}"
+    active = []
+    for session in sessions:
+        now_playing = session.get("NowPlayingItem") or {}
+        if str(session.get("UserId", "")) != str(user_id) or not now_playing:
+            continue
+        device = session.get("DeviceName") or session.get("Client") or "un appareil"
+        active.append(f"{_emby_item_label(now_playing)} sur {device}")
+    if not active:
+        return f"Aucune lecture Emby en cours pour {_emby_user_label()}."
+    return "Lecture Emby en cours : " + "; ".join(active[:3]) + "."
+
+
+def emby_resume_reprises():
+    if not current_user_is_owner():
+        return command_access_denied("Emby")
+    user_id = emby_resolve_user_id()
+    if not user_id:
+        return "Je ne trouve pas l'utilisateur Emby configure."
+    try:
+        payload = emby_api_get(f"/Users/{user_id}/Items/Resume", params={"Limit": 5, "Recursive": "true", "Fields": "BasicSyncInfo,ProductionYear"})
+    except Exception as e:
+        return f"Je n'arrive pas a lire les reprises Emby. {e}"
+    items = payload.get("Items", []) if isinstance(payload, dict) else []
+    if not items:
+        return "Aucune lecture Emby a reprendre pour le moment."
+    return "A reprendre sur Emby : " + "; ".join(_emby_item_label(item) for item in items[:5]) + "."
+
+
+def emby_resume_derniers_ajouts():
+    if not current_user_is_owner():
+        return command_access_denied("Emby")
+    user_id = emby_resolve_user_id()
+    if not user_id:
+        return "Je ne trouve pas l'utilisateur Emby configure."
+    try:
+        payload = emby_api_get(f"/Users/{user_id}/Items/Latest", params={"Limit": 8, "Fields": "ProductionYear"})
+    except Exception as e:
+        return f"Je n'arrive pas a lire les derniers ajouts Emby. {e}"
+    items = payload if isinstance(payload, list) else payload.get("Items", [])
+    if not items:
+        return "Je ne vois aucun ajout recent sur Emby."
+    return "Derniers ajouts Emby : " + "; ".join(_emby_item_label(item) for item in items[:6]) + "."
+
+
+def emby_resume_bibliotheque():
+    if not current_user_is_owner():
+        return command_access_denied("Emby")
+    user_id = emby_resolve_user_id()
+    if not user_id:
+        return "Je ne trouve pas l'utilisateur Emby configure."
+    try:
+        payload = emby_api_get(f"/Users/{user_id}/Items", params={"Recursive": "true", "IncludeItemTypes": "Movie,Episode,Series,Audio", "Limit": 1})
+    except Exception as e:
+        return f"Je n'arrive pas a lire la bibliotheque Emby. {e}"
+    total = payload.get("TotalRecordCount", 0) if isinstance(payload, dict) else 0
+    return f"Votre bibliotheque Emby contient environ {total} elements suivis pour {_emby_user_label()}."
+
+
+def emby_resume_global():
+    if not current_user_is_owner():
+        return command_access_denied("Emby")
+    parts = [emby_resume_en_cours(), emby_resume_reprises(), emby_resume_derniers_ajouts()]
+    clean = [part for part in parts if part]
+    return " ".join(clean)
+
 
 def recherche_web_serpapi(query):
     """Effectue une recherche sur Google via SerpAPI."""
@@ -2949,14 +3586,14 @@ def get_resultats_sport_gemini(question_sport):
     if not client:
         return "Gemini n'est pas configure, je ne peux pas recuperer les resultats sportifs enrichis pour le moment."
     try:
-        response = client.models.generate_content(
-            model   = CHOSEN_MODEL,
-            contents= [types.Content(role="user", parts=[types.Part(text=
+        response = _gemini_generate_blocking(
+            model=CHOSEN_MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=
                 f"Donne-moi les derniers resultats et actualites sportives en 2026 "
                 f"pour : {question_sport}. "
                 f"Sois precis, donne les scores et dates. Reponds en francais."
             )])],
-            config  = types.GenerateContentConfig(
+            config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
                 system_instruction=(
                     "Tu es un expert sportif. Donne des resultats precis et a jour. "
@@ -3090,6 +3727,8 @@ def init_mixer():
 async def parler(texte):
     global is_speaking, speak_volume, STOP_PARLER, _skip_pc_audio, historique
     
+    texte = personalize_output_text(texte)
+
     # Nettoyage des caractères de mise en forme Markdown pour le TTS
     texte_tts = texte.replace("**", "").replace("*", "").replace("#", "").replace("`", "").strip()
     
@@ -3117,7 +3756,11 @@ async def parler(texte):
                     with open(tmp, "rb") as f:
                         audio_b64 = base64.b64encode(f.read()).decode('utf-8')
                     message = json.dumps({"action": "jarvis_audio", "text": texte_tts, "audio_b64": audio_b64})
-                    await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS])
+                    client_id = COMMAND_HTTP_CLIENT_ID.get()
+                    if client_id:
+                        queue_http_client_event(client_id, {"action": "jarvis_audio", "text": texte_tts, "audio_b64": audio_b64})
+                    if CONNECTED_CLIENTS:
+                        await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
                 except Exception as e:
                     print(f"[MOBILE] Erreur envoi audio : {e}")
             # Ne joue pas l'audio sur le PC
@@ -3464,9 +4107,6 @@ async def demander_ia(texte):
             global GEMINI_QUOTA_BLOCKED_UNTIL
             if not client:
                 raise Exception("Gemini non configure (GEMINI_API_KEY manquante ou factice)")
-            if time.time() < GEMINI_QUOTA_BLOCKED_UNTIL:
-                attente = int(max(1, GEMINI_QUOTA_BLOCKED_UNTIL - time.time()))
-                raise Exception(f"Gemini temporairement suspendu pour quota, reessayez dans {attente}s")
             print(f"[CERVEAU] Tentative avec Gemini (Liste: {MODELS_LIST})...")
             # On ne modifie pas l'historique global avant d'être sûr que ça marche
             temp_hist = historique + [types.Content(role="user", parts=[types.Part(text=texte)])]
@@ -3477,18 +4117,15 @@ async def demander_ia(texte):
                 try:
                     print(f"[CERVEAU] Essai modele : {model_name} (Timeout 12s)")
                     # Utilisation de to_thread pour ne pas bloquer la boucle et pouvoir mettre un timeout
-                    response = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            client.models.generate_content,
-                            model=model_name,
-                            config=types.GenerateContentConfig(
-                                system_instruction=prompt_actuel,
-                                temperature=0.7,
-                                tools=[types.Tool(google_search=types.GoogleSearch())],
-                            ),
-                            contents=temp_hist
+                    response = await gemini_generate_with_failover(
+                        model=model_name,
+                        contents=temp_hist,
+                        config=types.GenerateContentConfig(
+                            system_instruction=prompt_actuel,
+                            temperature=0.7,
+                            tools=[types.Tool(google_search=types.GoogleSearch())],
                         ),
-                        timeout=12.0
+                        timeout=12.0,
                     )
                     rep = response.text
                     # Succès : mise à jour de l'historique officiel
@@ -3637,18 +4274,15 @@ async def demander_ia_vision(texte, img_b64):
             for attempt in range(2): # 2 tentatives par modele
                 try:
                     print(f"[VISION] Appel modele : {model_name} (Timeout 15s)")
-                    response = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            client.models.generate_content,
-                            model=model_name,
-                            config=types.GenerateContentConfig(
-                                system_instruction=prompt_actuel,
-                                temperature=0.7,
-                                tools=[types.Tool(google_search=types.GoogleSearch())],
-                            ),
-                            contents=contents
+                    response = await gemini_generate_with_failover(
+                        model=model_name,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=prompt_actuel,
+                            temperature=0.7,
+                            tools=[types.Tool(google_search=types.GoogleSearch())],
                         ),
-                        timeout=15.0
+                        timeout=15.0,
                     )
                     rep = response.text
                     break
@@ -3853,10 +4487,10 @@ async def generer_image_gemini(prompt):
 
     try:
         print(f"[IMAGE] Generation demandee : {prompt}")
-        response = await asyncio.to_thread(
-            client.models.generate_content,
+        response = await gemini_generate_with_failover(
             model="gemini-2.5-flash-image",
             contents=[prompt],
+            timeout=20.0,
         )
 
         parts = []
@@ -3946,6 +4580,8 @@ async def resoudre_commandes_locales(texte):
                 return json.dumps({"action": "generate_image", "prompt": prompt}, ensure_ascii=False)
 
     if "pronote" in t or any(expr in t for expr in ["emploi du temps", "devoir", "devoirs", "notes", "moyenne", "absences", "retards"]):
+        if not current_user_is_owner():
+            return command_access_denied("Pronote")
         if "emploi du temps" in t or "edt" in t or "cours" in t:
             return pronote_timetable_resume("tomorrow" if "demain" in t else "today")
         if "devoir" in t:
@@ -3958,8 +4594,10 @@ async def resoudre_commandes_locales(texte):
             return pronote_home_assistant_resume()
 
     if est_requete_meteo_generale(texte) and not re.search(r"\b(?:a|à)\s+[a-zà-ÿ' -]{2,}", t):
-        print("[METEO] Requete generale detectee -> Home Assistant prioritaire")
-        return repondre_meteo_maison_ou_ville(None)
+        if current_user_is_owner():
+            print("[METEO] Requete generale detectee -> Home Assistant prioritaire")
+            return repondre_meteo_maison_ou_ville(None)
+        return repondre_meteo_maison_ou_ville(HOME_LOCATION_NAME or None)
 
     if any(expr in t for expr in [
         "raconte une blague", "raconte-moi une blague", "raconte moi une blague",
@@ -3977,7 +4615,29 @@ async def resoudre_commandes_locales(texte):
             return "Je peux le faire, Tom, mais il me faut le nom de l'utilisateur Proxmox."
 
     if "proxmox" in t and any(k in t for k in ["utilisateur", "utilisateurs", "user", "users", "compte", "comptes", "acces", "accès", "permission", "permissions"]):
+        if not current_user_is_owner():
+            return command_access_denied("Proxmox")
         return proxmox_resume_utilisateurs()
+
+    if "proxmox" in t and not current_user_is_owner():
+        return command_access_denied("Proxmox")
+
+    emby_aliases = ["emby", "mby", "mbaye", "aime bi", "aimeby", "hemby"]
+    parle_emby = any(alias in t for alias in emby_aliases)
+
+    if parle_emby and not current_user_is_owner():
+        return command_access_denied("Emby")
+
+    if parle_emby:
+        if any(k in t for k in ["en cours", "lecture", "lectures", "lit", "regarde", "playing", "session", "sessions"]):
+            return emby_resume_en_cours()
+        if any(k in t for k in ["reprendre", "continue", "continuer", "reprise", "resume"]):
+            return emby_resume_reprises()
+        if any(k in t for k in ["ajout", "ajouts", "recent", "recents", "récents", "nouveau", "nouveautés", "neuf"]):
+            return emby_resume_derniers_ajouts()
+        if any(k in t for k in ["bibliotheque", "bibliothèque", "librairie", "stats", "statistiques", "combien"]):
+            return emby_resume_bibliotheque()
+        return emby_resume_global()
 
     commande_proxmox = proxmox_parser_commande_directe(texte)
     if commande_proxmox:
@@ -4110,8 +4770,10 @@ async def resoudre_commandes_locales(texte):
 
     return None
 
-async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
+async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, http_client_id=""):
     global MODE_IRON_MAN, jarvis_actif, dernier_message, _skip_pc_audio
+    COMMAND_CONTEXT.set(build_command_context(auth_user, client_id=http_client_id))
+    COMMAND_HTTP_CLIENT_ID.set(http_client_id or "")
     # Reset du flag audio au début de chaque commande
     _skip_pc_audio = False
 
@@ -4184,6 +4846,9 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
             # Timeout de 15s pour chaque action pour eviter de freezer Jarvis
             data = json.loads(block)
             action = data.get("action", "")
+            if action_requires_owner(action) and not current_user_is_owner():
+                await parler(command_access_denied("Home Assistant" if action.startswith("ha_") else "Proxmox"))
+                continue
             
             # On execute l'action avec un timeout
             try:
@@ -4219,9 +4884,9 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
             elif action == "lister_memoire":
                 memoire = charger_memoire()
                 if not memoire:
-                    await parler("Aucune information personnalisee en memoire, Tom.")
+                    await parler(f"Aucune information personnalisee en memoire pour {get_current_memory_label()}.")
                 else:
-                    lignes = ["Voici ce que je sais sur vous Tom."]
+                    lignes = [f"Voici ce que je sais pour {get_current_memory_label()}."]
                     for cle, data_m in memoire.items():
                         lignes.append(f"{cle} : {data_m['valeur']}.")
                     await parler(" ".join(lignes))
@@ -4484,6 +5149,22 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None):
                 ville = data.get("ville") or None
                 await parler("Je consulte la meteo, un instant Tom.")
                 result = repondre_meteo_maison_ou_ville(ville)
+                await parler(result)
+            elif action == "emby_status":
+                await parler("Je consulte votre espace Emby, un instant.")
+                result = emby_resume_global()
+                await parler(result)
+            elif action == "emby_current":
+                result = emby_resume_en_cours()
+                await parler(result)
+            elif action == "emby_continue":
+                result = emby_resume_reprises()
+                await parler(result)
+            elif action == "emby_latest":
+                result = emby_resume_derniers_ajouts()
+                await parler(result)
+            elif action == "emby_library":
+                result = emby_resume_bibliotheque()
                 await parler(result)
             elif action == "proxmox_statut":
                 await parler("Je consulte l'etat de votre Proxmox, un instant Tom.")
@@ -4907,18 +5588,48 @@ def start_http_interface_server():
     def serve_generated_file(filename):
         return send_from_directory(str(GENERATED_IMAGES_DIR), filename)
 
+    def ensure_http_client_id():
+        client_id = session.get("jarvis_client_id")
+        if not client_id:
+            client_id = secrets.token_urlsafe(18)
+            session["jarvis_client_id"] = client_id
+        return client_id
+
     @app.get("/api/auth/status")
     def auth_status():
         user = session.get("discord_user")
+        owner_authenticated = is_owner_authenticated()
         return jsonify({
-            "authenticated": is_owner_authenticated(),
-            "user": user if is_owner_authenticated() else None,
+            "authenticated": owner_authenticated,
+            "user": user if owner_authenticated else None,
             "assistant_name": ASSISTANT_NAME,
             "login_url": "/auth/discord/login",
             "logout_url": "/auth/logout",
             "discord_configured": DISCORD_CONFIGURED,
             "config_flags": get_service_config_flags(),
+            "service_health": get_service_health_flags(),
+            "ws_auth_token": issue_ws_auth_token(user) if owner_authenticated else "",
         })
+
+    @app.post("/api/command")
+    def api_command():
+        payload = flask_request.get_json(silent=True) or {}
+        texte = str(payload.get("text", "")).strip()
+        if not texte:
+            return jsonify({"error": "empty_text"}), 400
+        client_id = str(payload.get("client_id", "")).strip() or ensure_http_client_id()
+        session["jarvis_client_id"] = client_id
+        user = session.get("discord_user") if is_owner_authenticated() else None
+        threading.Thread(
+            target=lambda: asyncio.run(traiter_reponse_ia(texte, auth_user=user, http_client_id=client_id)),
+            daemon=True,
+        ).start()
+        return jsonify({"ok": True})
+
+    @app.get("/api/client/events")
+    def api_client_events():
+        client_id = ensure_http_client_id()
+        return jsonify({"events": pop_http_client_events(client_id)})
 
     @app.get("/api/settings")
     @owner_auth_required()
@@ -4926,6 +5637,7 @@ def start_http_interface_server():
         return jsonify({
             "settings": get_private_runtime_settings(),
             "config_flags": get_service_config_flags(),
+            "service_health": get_service_health_flags(),
         })
 
     @app.post("/api/settings")
@@ -4945,6 +5657,7 @@ def start_http_interface_server():
             "ok": True,
             "settings": get_private_runtime_settings(),
             "config_flags": get_service_config_flags(),
+            "service_health": get_service_health_flags(force_refresh=True),
         })
 
     @app.get("/api/debug/logs")

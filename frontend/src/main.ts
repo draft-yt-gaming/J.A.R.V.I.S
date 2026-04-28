@@ -26,6 +26,11 @@ type BrowserSpeechRecognition = {
 
 type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
+type ServiceHealth = {
+  state: "ok" | "error" | "missing";
+  detail?: string;
+};
+
 type AuthStatus = {
   authenticated: boolean;
   user: { id: string; username?: string; global_name?: string } | null;
@@ -34,11 +39,14 @@ type AuthStatus = {
   logout_url: string;
   discord_configured: boolean;
   config_flags: Record<string, boolean>;
+  service_health: Record<string, ServiceHealth>;
+  ws_auth_token?: string;
 };
 
 type SettingsResponse = {
   settings: Record<string, string | boolean>;
   config_flags: Record<string, boolean>;
+  service_health: Record<string, ServiceHealth>;
 };
 
 type DashboardField = {
@@ -56,10 +64,14 @@ type SectionMeta = {
 
 const DASHBOARD_FIELDS: DashboardField[] = [
   { key: "assistant_name", label: "Nom de l'assistant", type: "text", section: "General" },
-  { key: "GEMINI_API_KEY", label: "Gemini API Key", type: "password", section: "IA" },
+  { key: "GEMINI_API_KEY", label: "Gemini API Key(s)", type: "password", section: "IA", placeholder: "Une ou plusieurs cles, separees par virgule" },
   { key: "XAI_API_KEY", label: "xAI API Key", type: "password", section: "IA" },
   { key: "GROQ_API_KEY", label: "Groq API Key", type: "password", section: "IA" },
   { key: "YOUTUBE_API_KEY", label: "YouTube API Key", type: "password", section: "Services" },
+  { key: "EMBY_URL", label: "Emby URL", type: "url", section: "Media", placeholder: "http://192.168.x.x:8096" },
+  { key: "EMBY_API_KEY", label: "Emby API Key", type: "password", section: "Media" },
+  { key: "EMBY_USER_ID", label: "Emby User ID", type: "text", section: "Media" },
+  { key: "EMBY_USERNAME", label: "Emby Username", type: "text", section: "Media" },
   { key: "SERPAPI_API_KEY", label: "SerpAPI Key", type: "password", section: "Services" },
   { key: "HA_URL", label: "Home Assistant URL", type: "url", section: "Home Assistant", placeholder: "http://192.168.x.x:8123" },
   { key: "HA_TOKEN", label: "Home Assistant Token", type: "password", section: "Home Assistant" },
@@ -73,8 +85,10 @@ const DASHBOARD_FIELDS: DashboardField[] = [
   { key: "DISCORD_REDIRECT_URI", label: "Discord Redirect URI", type: "url", section: "Discord", placeholder: "http://IP:8080/auth/discord/callback" },
 ];
 
-const WS_URL = `ws://${window.location.hostname}:8765`;
+const WS_SCHEME = window.location.protocol === "https:" ? "wss" : "ws";
+const WS_URL = `${WS_SCHEME}://${window.location.hostname}:8765`;
 const RECONNECT_INTERVAL_MS = 2_000;
+const HTTP_POLL_INTERVAL_MS = 1_000;
 
 const canvas = document.getElementById("orb-canvas") as HTMLCanvasElement;
 const statusEl = document.getElementById("status-text") as HTMLDivElement;
@@ -112,6 +126,15 @@ const dashboardLogoutEl = document.getElementById("dashboard-logout") as HTMLBut
 const dashboardSaveEl = document.getElementById("dashboard-save") as HTMLButtonElement;
 
 const orb = createOrb(canvas);
+const CLIENT_ID_STORAGE_KEY = "jarvis_client_id";
+
+function getClientId(): string {
+  const existing = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+  if (existing) return existing;
+  const created = `client-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  window.localStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
+  return created;
+}
 
 const STATE_LABELS: Record<OrbState, string> = {
   idle: "",
@@ -122,6 +145,7 @@ const STATE_LABELS: Record<OrbState, string> = {
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let httpPollTimer: ReturnType<typeof setTimeout> | null = null;
 let currentAudio: HTMLAudioElement | null = null;
 let isListening = false;
 let authStatus: AuthStatus | null = null;
@@ -181,6 +205,10 @@ const SECTION_META: Record<string, SectionMeta> = {
   Services: {
     title: "Services",
     description: "Sources externes et connecteurs utilitaires relies au dashboard.",
+  },
+  Media: {
+    title: "Media",
+    description: "Connexion aux plateformes multimedia personnelles comme Emby.",
   },
   "Home Assistant": {
     title: "Home Assistant",
@@ -461,6 +489,132 @@ function setConnected(ok: boolean): void {
   muteButtonEl.disabled = !ok;
 }
 
+async function handleServerMessage(data: WsMessage): Promise<void> {
+  if (data.action === "request_screen_capture") {
+    const frame = await captureFrame();
+    if (frame && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "screen_frame", id: data.id, data: frame }));
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "screen_frame", id: data.id, error: "no_stream" }));
+    }
+    return;
+  }
+
+  if (data.action === "demo") {
+    orb.triggerDemo();
+    return;
+  }
+
+  if (data.action === "jarvis_audio") {
+    setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text || ""));
+    if (data.audio_b64) {
+      if (currentAudio) currentAudio.pause();
+      currentAudio = new Audio(`data:audio/mp3;base64,${data.audio_b64}`);
+      applyState("speaking");
+      void currentAudio.play().catch(() => {
+        showError("Lecture audio navigateur impossible");
+        applyState("idle");
+      });
+      currentAudio.addEventListener("ended", () => {
+        applyState("idle");
+        currentAudio = null;
+      }, { once: true });
+    }
+    return;
+  }
+
+  if (data.action === "jarvis_response" && typeof data.text === "string") {
+    setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text));
+    return;
+  }
+
+  if (data.action === "music_search" && typeof data.video_id === "string" && typeof data.query === "string") {
+    await loadMusicVideo(data.video_id, data.query);
+    return;
+  }
+
+  if (data.action === "music_play") {
+    playMusic();
+    return;
+  }
+
+  if (data.action === "music_pause") {
+    pauseMusic();
+    return;
+  }
+
+  if (data.action === "music_stop") {
+    stopMusic();
+    return;
+  }
+
+  if (data.action === "set_volume" && typeof data.volume === "number") {
+    orb.setVolume(data.volume);
+    return;
+  }
+
+  if (data.action === "set_state" && data.state) {
+    applyState(data.state as OrbState);
+    return;
+  }
+
+  if (data.state) {
+    applyState(data.state as OrbState);
+  }
+  if (typeof data.volume === "number") {
+    orb.setVolume(data.volume);
+  }
+  if (typeof data.muted === "boolean") {
+    setMuted(data.muted);
+  }
+}
+
+function stopHttpPolling(): void {
+  if (httpPollTimer) {
+    clearTimeout(httpPollTimer);
+    httpPollTimer = null;
+  }
+}
+
+function scheduleHttpPolling(delay = HTTP_POLL_INTERVAL_MS): void {
+  if (httpPollTimer) return;
+  httpPollTimer = setTimeout(() => {
+    httpPollTimer = null;
+    void pollHttpEvents();
+  }, delay);
+}
+
+async function pollHttpEvents(): Promise<void> {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    stopHttpPolling();
+    return;
+  }
+  try {
+    const response = await fetch("/api/client/events", { credentials: "same-origin" });
+    if (!response.ok) throw new Error("http_poll_failed");
+    const payload = (await response.json()) as { events?: WsMessage[] };
+    setConnected(true);
+    const events = Array.isArray(payload.events) ? payload.events : [];
+    for (const event of events) {
+      await handleServerMessage(event);
+    }
+  } catch {
+    setConnected(false);
+  } finally {
+    scheduleHttpPolling();
+  }
+}
+
+async function sendCommandHttp(text: string): Promise<boolean> {
+  const response = await fetch("/api/command", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, client_id: getClientId() }),
+  });
+  return response.ok;
+}
+
 function scheduleReconnect(): void {
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
@@ -478,85 +632,14 @@ function connect(): void {
   ws = new WebSocket(WS_URL);
 
   ws.addEventListener("open", () => {
+    stopHttpPolling();
     setConnected(true);
   });
 
   ws.addEventListener("message", async (event: MessageEvent) => {
     try {
       const data = JSON.parse(event.data as string) as WsMessage;
-
-      if (data.action === "request_screen_capture") {
-        const frame = await captureFrame();
-        if (frame && ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "screen_frame", id: data.id, data: frame }));
-        } else if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "screen_frame", id: data.id, error: "no_stream" }));
-        }
-        return;
-      }
-
-      if (data.action === "demo") {
-        orb.triggerDemo();
-        return;
-      }
-
-      if (data.action === "jarvis_audio") {
-        setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text || ""));
-        if (data.audio_b64) {
-          if (currentAudio) currentAudio.pause();
-          currentAudio = new Audio(`data:audio/mp3;base64,${data.audio_b64}`);
-          applyState("speaking");
-          void currentAudio.play().catch(() => {
-            showError("Lecture audio navigateur impossible");
-            applyState("idle");
-          });
-          currentAudio.addEventListener("ended", () => {
-            applyState("idle");
-            currentAudio = null;
-          }, { once: true });
-        }
-        return;
-      }
-
-      if (data.action === "jarvis_response" && typeof data.text === "string") {
-        setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text));
-        return;
-      }
-
-      if (data.action === "music_search" && typeof data.video_id === "string" && typeof data.query === "string") {
-        await loadMusicVideo(data.video_id, data.query);
-        return;
-      }
-
-      if (data.action === "music_play") {
-        playMusic();
-        return;
-      }
-
-      if (data.action === "music_pause") {
-        pauseMusic();
-        return;
-      }
-
-      if (data.action === "music_stop") {
-        stopMusic();
-        return;
-      }
-
-      if (data.action === "set_volume" && typeof data.volume === "number") {
-        orb.setVolume(data.volume);
-        return;
-      }
-
-      if (data.state) {
-        applyState(data.state as OrbState);
-      }
-      if (typeof data.volume === "number") {
-        orb.setVolume(data.volume);
-      }
-      if (typeof data.muted === "boolean") {
-        setMuted(data.muted);
-      }
+      await handleServerMessage(data);
     } catch {
       // ignore malformed messages
     }
@@ -565,17 +648,38 @@ function connect(): void {
   ws.addEventListener("close", () => {
     setConnected(false);
     applyState("idle");
+    scheduleHttpPolling(200);
     scheduleReconnect();
   });
 
   ws.addEventListener("error", () => {
     setConnected(false);
+    scheduleHttpPolling(200);
   });
 }
 
 function sendCommand(text: string): boolean {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify({ type: "mobile_command", text }));
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: "mobile_command",
+      text,
+      auth_token: authStatus?.authenticated ? authStatus.ws_auth_token || "" : "",
+      client_id: getClientId(),
+    }));
+    return true;
+  }
+
+  void sendCommandHttp(text).then((ok) => {
+    if (!ok) {
+      applyState("idle");
+      showError("Envoi HTTP impossible");
+      return;
+    }
+    scheduleHttpPolling(150);
+  }).catch(() => {
+    applyState("idle");
+    showError("Envoi HTTP impossible");
+  });
   return true;
 }
 
@@ -750,7 +854,7 @@ function renderDashboardFields(settings: Record<string, string | boolean>): void
   }
 }
 
-function renderConfigFlags(flags: Record<string, boolean>): void {
+function renderConfigFlags(health: Record<string, ServiceHealth>): void {
   const labels: Record<string, string> = {
     gemini: "Gemini",
     youtube: "YouTube",
@@ -758,14 +862,25 @@ function renderConfigFlags(flags: Record<string, boolean>): void {
     home_assistant: "Home Assistant",
     serpapi: "SerpAPI",
     groq: "Groq",
+    emby: "Emby",
     proxmox: "Proxmox",
     discord: "Discord",
   };
+  const stateLabels: Record<ServiceHealth["state"], string> = {
+    ok: "ok",
+    error: "erreur",
+    missing: "absent",
+  };
+
   dashboardFlagsEl.innerHTML = "";
   Object.entries(labels).forEach(([key, label]) => {
+    const entry = health[key] || { state: "missing" as const };
     const pill = document.createElement("span");
-    pill.className = `config-pill ${flags[key] ? "is-on" : "is-off"}`;
-    pill.textContent = `${label} ${flags[key] ? "ok" : "off"}`;
+    pill.className = `config-pill is-${entry.state}`;
+    pill.textContent = `${label} ${stateLabels[entry.state]}`;
+    if (entry.detail) {
+      pill.title = entry.detail;
+    }
     dashboardFlagsEl.appendChild(pill);
   });
 }
@@ -794,17 +909,17 @@ function renderDashboardMeta(status: AuthStatus | null): void {
   `;
 }
 
-function renderDashboardSummary(status: AuthStatus | null, flags: Record<string, boolean>): void {
-  const total = Object.keys(flags).length;
-  const enabled = Object.values(flags).filter(Boolean).length;
+function renderDashboardSummary(status: AuthStatus | null, health: Record<string, ServiceHealth>): void {
+  const total = Object.keys(health).length;
+  const okCount = Object.values(health).filter((entry) => entry.state === "ok").length;
   const authMode = status?.discord_configured ? "Discord" : "Libre";
   const writeMode = status?.authenticated ? "Edition" : "Protege";
 
   dashboardSummaryEl.innerHTML = `
     <article class="dashboard-summary-card">
-      <span class="dashboard-summary-label">Integrations actives</span>
-      <strong>${enabled}/${total || 0}</strong>
-      <p>Lecture immediate des connecteurs disponibles.</p>
+      <span class="dashboard-summary-label">Integrations saines</span>
+      <strong>${okCount}/${total || 0}</strong>
+      <p>Vert si l'API repond, rouge si elle echoue, noir si elle manque.</p>
     </article>
     <article class="dashboard-summary-card">
       <span class="dashboard-summary-label">Controle d'acces</span>
@@ -827,8 +942,8 @@ async function fetchAuthStatus(): Promise<AuthStatus | null> {
     setAssistantName(data.assistant_name);
     dashboardButtonEl.classList.toggle("is-authenticated", data.authenticated);
     renderDashboardMeta(data);
-    renderDashboardSummary(data, data.config_flags || {});
-    renderConfigFlags(data.config_flags || {});
+    renderDashboardSummary(data, data.service_health || {});
+    renderConfigFlags(data.service_health || {});
     dashboardAuthStatusEl.textContent = data.authenticated
       ? `Connecte en tant que ${data.user?.global_name || data.user?.username || "owner"}`
       : (data.discord_configured
@@ -864,8 +979,8 @@ async function loadDashboardSettings(): Promise<void> {
   }
   const data = await response.json() as SettingsResponse;
   renderDashboardFields(data.settings);
-  renderConfigFlags(data.config_flags);
-  renderDashboardSummary(authStatus, data.config_flags || {});
+  renderConfigFlags(data.service_health || {});
+  renderDashboardSummary(authStatus, data.service_health || {});
   setDashboardBusy(false);
 }
 
@@ -896,8 +1011,8 @@ async function saveDashboardSettings(): Promise<void> {
   }
   const data = await response.json() as SettingsResponse & { ok: boolean };
   renderDashboardFields(data.settings);
-  renderConfigFlags(data.config_flags);
-  renderDashboardSummary(authStatus, data.config_flags || {});
+  renderConfigFlags(data.service_health || {});
+  renderDashboardSummary(authStatus, data.service_health || {});
   setAssistantName(String(data.settings.assistant_name || "J.A.R.V.I.S"));
   setDashboardBusy(false);
   showError("Reglages enregistres");
@@ -1077,6 +1192,7 @@ setMusicPlayerVisible(false);
 setMusicPlayerEmpty(true);
 renderDebugState();
 injectVisionButton();
+scheduleHttpPolling(400);
 connect();
 void fetchAuthStatus();
 handleUrlFeedback();
