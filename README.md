@@ -31,6 +31,7 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - Vision navigateur et capture d'ecran
 - Vision camera locale via OpenCV
 - Mini-player YouTube integre dans l'interface
+- Recherche musicale via YouTube Data API si `YOUTUBE_API_KEY` est configuree, avec fallback automatique sur la recherche actuelle
 - Service systemd dedie au mode VM/headless
 
 ## Architecture du projet
@@ -90,6 +91,7 @@ Creer un fichier `.env` a la racine. Exemple minimal :
 
 ```env
 GEMINI_API_KEY=VOTRE_CLE_OU_PLUSIEURS_CLES_SEPAREES_PAR_VIRGULE
+# Optionnelle : si absente ou invalide, Jarvis garde la recherche YouTube actuelle.
 YOUTUBE_API_KEY=VOTRE_CLE
 XAI_API_KEY=VOTRE_CLE
 GROQ_API_KEY=VOTRE_CLE

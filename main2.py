@@ -137,7 +137,10 @@ def env_value_is_configured(value):
     if not value:
         return False
     placeholders = {
+        "VOTRE_CLE",
+        "VOTRE_CLE_API",
         "VOTRE_CLE_ICI",
+        "VOTRE_TOKEN",
         "VOTRE_TOKEN_ICI",
         "http://192.168.1.XX:8123",
         "https://192.168.1.XX:8006",
@@ -1471,7 +1474,79 @@ def youtube_music_action_from_text(texte):
         recherche = DEFAULT_YOUTUBE_MUSIC_QUERY
     return json.dumps({"action": "music_search", "query": recherche}, ensure_ascii=False)
 
-def youtube_trouver_video_id(recherche):
+def _normaliser_recherche_youtube(value):
+    value = html.unescape(value or "").lower()
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(c for c in value if not unicodedata.combining(c))
+    value = value.replace("’", "'")
+    value = re.sub(r"[^a-z0-9']+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _scorer_video_youtube(recherche, title):
+    title_norm = _normaliser_recherche_youtube(title)
+    query_norm = _normaliser_recherche_youtube(recherche)
+    query_tokens = [
+        tok for tok in query_norm.split()
+        if len(tok) > 1 and tok not in {"de", "du", "la", "le", "les", "un", "une", "des", "et"}
+    ]
+    score = 0
+    for tok in query_tokens:
+        if tok in title_norm:
+            score += 8
+    if query_tokens and all(tok in title_norm for tok in query_tokens[:4]):
+        score += 20
+    preferred_markers = ["clip", "clip video", "video officielle", "video officiel", "official", "audio officiel", "audio"]
+    for marker in preferred_markers:
+        if marker in title_norm:
+            score += 12
+    penalty_markers = ["paroles", "lyrics", "lyric", "remix", "karaoke", "instrumental", "slowed", "reverb", "mouv", "code :"]
+    for marker in penalty_markers:
+        if marker in title_norm:
+            score -= 18
+    return score
+
+
+def youtube_trouver_video_id_api(recherche):
+    if not YOUTUBE_CONFIGURED:
+        return None
+    try:
+        response = requests.get(
+            "https://www.googleapis.com/youtube/v3/search",
+            params={
+                "part": "snippet",
+                "q": recherche,
+                "type": "video",
+                "maxResults": 8,
+                "videoCategoryId": "10",
+                "key": YOUTUBE_API_KEY,
+            },
+            timeout=7,
+        )
+        if not _service_ok(response):
+            print(f"[YOUTUBE] API indisponible HTTP {response.status_code}; fallback scraping.")
+            return None
+        items = response.json().get("items", [])
+        candidates = []
+        for item in items:
+            video_id = (item.get("id") or {}).get("videoId")
+            snippet = item.get("snippet") or {}
+            title = snippet.get("title", "")
+            if not video_id:
+                continue
+            candidates.append((_scorer_video_youtube(recherche, title), video_id, title))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        best_score, best_video_id, best_title = candidates[0]
+        print(f"[YOUTUBE] Choix video via API pour '{recherche}' : {best_title} ({best_video_id}) score={best_score}")
+        return best_video_id
+    except Exception as e:
+        print(f"[YOUTUBE] API impossible pour '{recherche}' : {e}; fallback scraping.")
+        return None
+
+
+def youtube_trouver_video_id_scraping(recherche):
     try:
         response = requests.get(
             "https://www.youtube.com/results",
@@ -1487,61 +1562,34 @@ def youtube_trouver_video_id(recherche):
         response.raise_for_status()
         text = response.text
 
-        def _normalize(value):
-            value = html.unescape(value or "").lower()
-            value = unicodedata.normalize("NFKD", value)
-            value = "".join(c for c in value if not unicodedata.combining(c))
-            value = value.replace("’", "'")
-            value = re.sub(r"[^a-z0-9']+", " ", value)
-            return re.sub(r"\s+", " ", value).strip()
-
-        query_norm = _normalize(recherche)
-        query_tokens = [
-            tok for tok in query_norm.split()
-            if len(tok) > 1 and tok not in {"de", "du", "la", "le", "les", "un", "une", "des", "et"}
-        ]
-
         candidates = []
         pattern = r'"videoRenderer":\{"videoId":"([a-zA-Z0-9_-]{11})".*?"title":\{"runs":\[(.*?)\]\}'
         for match in re.finditer(pattern, text):
             video_id = match.group(1)
             title_runs = match.group(2)
             title = "".join(re.findall(r'"text":"(.*?)"', title_runs))
-            title_norm = _normalize(title)
-            score = 0
-
-            for tok in query_tokens:
-                if tok in title_norm:
-                    score += 8
-
-            if all(tok in title_norm for tok in query_tokens[:4]):
-                score += 20
-
-            preferred_markers = ["clip", "clip video", "video officielle", "video officiel", "official", "audio officiel", "audio"]
-            for marker in preferred_markers:
-                if marker in title_norm:
-                    score += 12
-
-            penalty_markers = ["paroles", "lyrics", "lyric", "remix", "karaoke", "instrumental", "slowed", "reverb", "mouv", "code :"]
-            for marker in penalty_markers:
-                if marker in title_norm:
-                    score -= 18
-
-            candidates.append((score, video_id, title))
+            candidates.append((_scorer_video_youtube(recherche, title), video_id, title))
             if len(candidates) >= 12:
                 break
 
         if candidates:
             candidates.sort(key=lambda item: item[0], reverse=True)
             best_score, best_video_id, best_title = candidates[0]
-            print(f"[YOUTUBE] Choix video pour '{recherche}' : {best_title} ({best_video_id}) score={best_score}")
+            print(f"[YOUTUBE] Choix video via scraping pour '{recherche}' : {best_title} ({best_video_id}) score={best_score}")
             return best_video_id
 
         match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', text)
         return match.group(1) if match else None
     except Exception as e:
-        print(f"[YOUTUBE] Recherche impossible pour '{recherche}' : {e}")
+        print(f"[YOUTUBE] Recherche scraping impossible pour '{recherche}' : {e}")
         return None
+
+
+def youtube_trouver_video_id(recherche):
+    video_id = youtube_trouver_video_id_api(recherche)
+    if video_id:
+        return video_id
+    return youtube_trouver_video_id_scraping(recherche)
 
 # ==========================================
 # PROMPT SYSTEME
