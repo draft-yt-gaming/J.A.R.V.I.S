@@ -6401,6 +6401,20 @@ def start_http_interface_server():
     def serve_generated_file(filename):
         return send_from_directory(str(GENERATED_IMAGES_DIR), filename)
 
+    @app.get("/install/proxmox-lxc.sh")
+    def serve_proxmox_lxc_installer():
+        script_path = BASE_DIR / "scripts" / "proxmox_create_lxc.sh"
+        if not script_path.exists():
+            return jsonify({"error": "installer_not_found"}), 404
+        return Response(
+            script_path.read_text(encoding="utf-8"),
+            mimetype="text/x-shellscript; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": "inline; filename=jarvis-proxmox-lxc.sh",
+            },
+        )
+
     def ensure_http_client_id():
         client_id = session.get("jarvis_client_id")
         if not client_id:

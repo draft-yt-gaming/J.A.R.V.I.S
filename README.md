@@ -241,16 +241,19 @@ JARVIS peut tourner dans un container LXC Proxmox pour l'usage web/headless. C'e
 Un assistant interactif est fourni pour etre lance **sur l'hote Proxmox**, en root, avec une seule commande :
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/draft-yt-gaming/J.A.R.V.I.S/main/scripts/proxmox_create_lxc.sh)"
+bash -c "$(curl -fsSL https://jarvis.drafthome.fr/install/proxmox-lxc.sh)"
 ```
 
 Variante plus prudente si tu veux lire le script avant execution :
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/draft-yt-gaming/J.A.R.V.I.S/main/scripts/proxmox_create_lxc.sh -o /tmp/jarvis-proxmox-lxc.sh
+curl -fsSL https://jarvis.drafthome.fr/install/proxmox-lxc.sh -o /tmp/jarvis-proxmox-lxc.sh
 less /tmp/jarvis-proxmox-lxc.sh
 bash /tmp/jarvis-proxmox-lxc.sh
 ```
+
+
+Le fichier est servi directement par JARVIS via `/install/proxmox-lxc.sh`, ce qui evite de dependre d'un acces raw GitHub public.
 
 Si le depot est deja clone sur l'hote Proxmox, tu peux aussi lancer :
 
