@@ -43,6 +43,7 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - `mobile/` : ancienne interface mobile / ressources annexes
 - `start_jarvis.sh` : lancement local classique
 - `start_jarvis_vm.sh` : lancement VM/headless
+- `scripts/update_jarvis.sh` : mise a jour depuis GitHub sans ecraser les reglages locaux
 - `jarvis_agent.py` : agent auxiliaire
 - `generated_images/` : images generees
 - `jarvis_memoire.json` : memoire persistante runtime
@@ -68,7 +69,7 @@ apt-get install -y python3-venv python3-pip python3-dev build-essential pkg-conf
 ### 1. Cloner le projet
 
 ```bash
-git clone git@github.com:draft-yt-gaming/J.A.R.V.I.S.git
+git clone https://github.com/draft-yt-gaming/J.A.R.V.I.S.git
 cd J.A.R.V.I.S
 ```
 
@@ -127,6 +128,32 @@ Notes :
 - `GEMINI_API_KEY` accepte une ou plusieurs cles separees par virgule, point-virgule ou retour ligne.
 - Les reglages peuvent ensuite etre modifies depuis le dashboard et sont enregistres dans `jarvis_runtime_settings.json`.
 - En mode public, pense a adapter `DISCORD_REDIRECT_URI` a ton domaine reel.
+
+
+## Mise a jour
+
+Les cles API et les reglages locaux ne sont pas versionnes dans Git : `.env`, `jarvis_runtime_settings.json` et `jarvis_memoire.json` restent sur la machine. Pour recuperer la derniere version sans les remettre a la main :
+
+```bash
+bash scripts/update_jarvis.sh
+```
+
+Le script :
+- fonctionne avec un clone HTTPS public, sans cle SSH GitHub ;
+- sauvegarde `.env`, `jarvis_runtime_settings.json` et `jarvis_memoire.json` dans `.jarvis_backups/` ;
+- recupere la derniere version de la branche `main` sur GitHub ;
+- refuse de continuer si des fichiers suivis ont ete modifies localement, sauf avec `--force` ;
+- met a jour `requirements.txt` et/ou le frontend seulement si les fichiers concernes ont change ;
+- redemarre `jarvis-vm.service` quand le service existe.
+
+Options utiles :
+
+```bash
+bash scripts/update_jarvis.sh --no-restart
+bash scripts/update_jarvis.sh --branch main
+```
+
+Aucune API hebergee en plus n'est necessaire pour ce fonctionnement : GitHub sert de canal de mise a jour. Une API publique ne devient utile que si tu veux plus tard afficher une annonce de version dans l'interface ou gerer des canaux `stable` / `beta`.
 
 ## Ollama local
 

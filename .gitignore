@@ -15,3 +15,5 @@ frontend/.vite/
 generated_images/
 
 .certs/
+
+.jarvis_backups/
