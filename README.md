@@ -451,7 +451,11 @@ Le build genere `frontend/dist/`, servi ensuite par Flask en mode VM/headless.
 
 Une extension Chrome non publiee est fournie dans `chrome-extension/`. Elle permet de lire le texte de l'onglet actif et de demander a Jarvis un resume de la page.
 
-Installation locale :
+Le dossier `chrome-extension/` reste le code source de l'extension. Pour la distribuer plus simplement, GitHub Actions genere un ZIP telechargeable :
+- en artifact quand le workflow `Package Chrome extension` est lance manuellement ;
+- en asset de GitHub Release quand un tag `v...` est pousse.
+
+Installation locale depuis le dossier source :
 
 ```text
 1. Ouvrir chrome://extensions
@@ -459,6 +463,26 @@ Installation locale :
 3. Cliquer sur Charger l'extension non empaquetee
 4. Selectionner le dossier chrome-extension/ du projet
 ```
+
+Installation depuis un ZIP GitHub Release :
+
+```text
+1. Telecharger jarvis-chrome-extension-*.zip dans la release GitHub
+2. Dezipper le fichier dans un dossier local
+3. Ouvrir chrome://extensions
+4. Activer le mode developpeur
+5. Cliquer sur Charger l'extension non empaquetee
+6. Selectionner le dossier dezippe
+```
+
+Pour publier un nouvel asset d'extension :
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+Le workflow attache alors `jarvis-chrome-extension-<version>.zip` aux assets de la release GitHub.
 
 Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup. Une adresse sans protocole est normalisee automatiquement : `jarvis.drafthome.fr` devient `https://jarvis.drafthome.fr`, tandis que les IP locales restent en HTTP sauf ports HTTPS (`443` ou `8443`).
 

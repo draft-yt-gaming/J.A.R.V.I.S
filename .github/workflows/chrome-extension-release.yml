@@ -1,0 +1,50 @@
+name: Package Chrome extension
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Read extension version
+        id: version
+        run: |
+          version="$(python3 -c "import json; print(json.load(open('chrome-extension/manifest.json'))['version'])")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build extension zip
+        run: |
+          name="jarvis-chrome-extension-${{ steps.version.outputs.version }}.zip"
+          (cd chrome-extension && zip -r "../$name" . -x '*.DS_Store' '__MACOSX/*')
+          echo "EXTENSION_ZIP=$name" >> "$GITHUB_ENV"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-chrome-extension-${{ steps.version.outputs.version }}
+          path: ${{ env.EXTENSION_ZIP }}
+          if-no-files-found: error
+
+      - name: Create or update GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" --title "$TAG_NAME" --notes "Release $TAG_NAME"
+          fi
+          gh release upload "$TAG_NAME" "$EXTENSION_ZIP" --clobber
