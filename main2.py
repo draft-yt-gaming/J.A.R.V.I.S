@@ -166,6 +166,10 @@ DEFAULT_SETTINGS = {
     "SERPAPI_API_KEY": os.getenv("SERPAPI_API_KEY", ""),
     "GROQ_API_KEY": os.getenv("GROQ_API_KEY", ""),
     "NASA_API_KEY": os.getenv("NASA_API_KEY", ""),
+    "OLLAMA_ENABLED": os.getenv("OLLAMA_ENABLED", "false"),
+    "OLLAMA_PREFER_LOCAL": os.getenv("OLLAMA_PREFER_LOCAL", "false"),
+    "OLLAMA_URL": os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"),
+    "OLLAMA_MODELS": os.getenv("OLLAMA_MODELS", "llama3.1:8b,llama3:8b,mistral:instruct,mistral"),
     "EMBY_URL": os.getenv("EMBY_URL", ""),
     "EMBY_API_KEY": os.getenv("EMBY_API_KEY", ""),
     "EMBY_USER_ID": os.getenv("EMBY_USER_ID", ""),
@@ -242,6 +246,10 @@ HOME_LOCATION_NAME = ""
 SERPAPI_API_KEY = ""
 GROQ_API_KEY = ""
 NASA_API_KEY = ""
+OLLAMA_ENABLED = False
+OLLAMA_PREFER_LOCAL = False
+OLLAMA_URL = "http://127.0.0.1:11434"
+OLLAMA_MODELS = []
 EMBY_URL = ""
 EMBY_API_KEY = ""
 EMBY_USER_ID = ""
@@ -264,6 +272,7 @@ HA_CONFIGURED = False
 SERPAPI_CONFIGURED = False
 GROQ_CONFIGURED = False
 NASA_CONFIGURED = False
+OLLAMA_CONFIGURED = False
 EMBY_CONFIGURED = False
 PROXMOX_CONFIGURED = False
 DISCORD_CONFIGURED = False
@@ -277,12 +286,13 @@ app = None
 def refresh_runtime_config():
     global ASSISTANT_NAME, GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_MODEL_KEY_BLOCKED_UNTIL, BLAGUES_API_TOKEN, YOUTUBE_API_KEY, XAI_API_KEY
     global HA_URL, HA_TOKEN, HA_WEATHER_ENTITY, HOME_LOCATION_NAME, SERPAPI_API_KEY, GROQ_API_KEY, NASA_API_KEY
+    global OLLAMA_ENABLED, OLLAMA_PREFER_LOCAL, OLLAMA_URL, OLLAMA_MODELS
     global EMBY_URL, EMBY_API_KEY, EMBY_USER_ID, EMBY_USERNAME
     global PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_VERIFY_SSL
     global DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI
     global JARVIS_SESSION_SECRET
     global GEMINI_CONFIGURED, BLAGUES_CONFIGURED, YOUTUBE_CONFIGURED, XAI_CONFIGURED, HA_CONFIGURED
-    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, NASA_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
+    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, NASA_CONFIGURED, OLLAMA_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
     global client, GEMINI_CLIENTS, blagues_client, grok_client, groq_client, HA_HEADERS
 
     settings = RUNTIME_SETTINGS
@@ -298,6 +308,10 @@ def refresh_runtime_config():
     SERPAPI_API_KEY = settings.get("SERPAPI_API_KEY", "")
     GROQ_API_KEY = settings.get("GROQ_API_KEY", "")
     NASA_API_KEY = settings.get("NASA_API_KEY", "")
+    OLLAMA_ENABLED = str(settings.get("OLLAMA_ENABLED", "false")).strip().lower() in ("1", "true", "yes", "on")
+    OLLAMA_PREFER_LOCAL = str(settings.get("OLLAMA_PREFER_LOCAL", "false")).strip().lower() in ("1", "true", "yes", "on")
+    OLLAMA_URL = str(settings.get("OLLAMA_URL", "http://127.0.0.1:11434")).strip().rstrip("/") or "http://127.0.0.1:11434"
+    OLLAMA_MODELS = [model.strip() for model in re.split(r"[\n,;]+", str(settings.get("OLLAMA_MODELS", ""))) if model.strip()]
     EMBY_URL = str(settings.get("EMBY_URL", "")).strip()
     EMBY_API_KEY = str(settings.get("EMBY_API_KEY", "")).strip()
     EMBY_USER_ID = str(settings.get("EMBY_USER_ID", "")).strip()
@@ -324,6 +338,7 @@ def refresh_runtime_config():
     SERPAPI_CONFIGURED = env_value_is_configured(SERPAPI_API_KEY)
     GROQ_CONFIGURED = env_value_is_configured(GROQ_API_KEY)
     NASA_CONFIGURED = env_value_is_configured(NASA_API_KEY)
+    OLLAMA_CONFIGURED = OLLAMA_ENABLED and env_value_is_configured(OLLAMA_URL) and bool(OLLAMA_MODELS)
     EMBY_CONFIGURED = env_value_is_configured(EMBY_URL) and env_value_is_configured(EMBY_API_KEY)
     PROXMOX_CONFIGURED = all(
         env_value_is_configured(v)
@@ -373,6 +388,7 @@ def get_service_config_flags():
         "serpapi": SERPAPI_CONFIGURED,
         "groq": GROQ_CONFIGURED,
         "nasa": True,
+        "ollama": OLLAMA_CONFIGURED,
         "emby": EMBY_CONFIGURED,
         "proxmox": PROXMOX_CONFIGURED,
         "discord": DISCORD_CONFIGURED,
@@ -524,6 +540,26 @@ def _test_nasa_status():
     except Exception as e:
         return _status_payload("error", str(e))
 
+def _test_ollama_status():
+    if not OLLAMA_ENABLED:
+        return _status_payload("missing", "desactive")
+    if not OLLAMA_CONFIGURED:
+        return _status_payload("missing", "URL ou modele manquant")
+    try:
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=4)
+        if not _service_ok(r):
+            return _status_payload("error", f"HTTP {r.status_code}")
+        models = [item.get("name", "") for item in (r.json().get("models") or [])]
+        configured = set(OLLAMA_MODELS)
+        available = [model for model in models if model in configured]
+        if available:
+            return _status_payload("ok", f"{OLLAMA_URL} : {', '.join(available[:3])}")
+        detail = "aucun modele configure trouve" if models else "aucun modele installe"
+        return _status_payload("error", detail)
+    except Exception as e:
+        return _status_payload("error", str(e))
+
+
 def _test_discord_status():
     if not DISCORD_CONFIGURED:
         return _status_payload("missing")
@@ -548,6 +584,7 @@ def get_service_health_flags(force_refresh=False):
         "serpapi": _test_serpapi_status(),
         "groq": _test_groq_status(),
         "nasa": _test_nasa_status(),
+        "ollama": _test_ollama_status(),
         "emby": _test_emby_status(),
         "proxmox": _test_proxmox_status(),
         "discord": _test_discord_status(),
@@ -578,6 +615,10 @@ def get_private_runtime_settings():
         "SERPAPI_API_KEY": SERPAPI_API_KEY,
         "GROQ_API_KEY": GROQ_API_KEY,
         "NASA_API_KEY": NASA_API_KEY,
+        "OLLAMA_ENABLED": OLLAMA_ENABLED,
+        "OLLAMA_PREFER_LOCAL": OLLAMA_PREFER_LOCAL,
+        "OLLAMA_URL": OLLAMA_URL,
+        "OLLAMA_MODELS": ",".join(OLLAMA_MODELS),
         "EMBY_URL": EMBY_URL,
         "EMBY_API_KEY": EMBY_API_KEY,
         "EMBY_USER_ID": EMBY_USER_ID,
@@ -859,9 +900,7 @@ async def gemini_generate_with_failover(model, contents, config=None, timeout=12
         timeout=timeout,
     )
 
-# Ollama (LLMs locaux — fallback 100% offline)
-OLLAMA_URL      = "http://127.0.0.1:11434"
-OLLAMA_MODELS   = ["mistral:instruct", "mistral", "llama3:8b", "llama3", "gemma4"]
+# Ollama est configure depuis le dashboard/env : OLLAMA_URL, OLLAMA_MODELS, OLLAMA_ENABLED.
 
 VILLE_PAR_DEFAUT = "Amilly"
 LAT_PAR_DEFAUT   = 47.9742
@@ -4821,6 +4860,13 @@ async def demander_ia(texte):
                 raise Exception("Grok n'a rien renvoyé ou est mal configuré")
             return rep_grok
 
+        if OLLAMA_PREFER_LOCAL and OLLAMA_CONFIGURED and cerveau != "GROK":
+            print("[CERVEAU] Ollama prioritaire active. Tentative locale avant cloud.")
+            rep_ollama = await demander_ollama(texte)
+            if rep_ollama:
+                return rep_ollama
+            print("[CERVEAU] Ollama prioritaire indisponible. Repli cloud.")
+
         # Logique de bascule bidirectionnelle
         if cerveau == "GROK" and grok_client:
             try:
@@ -5055,6 +5101,8 @@ async def demander_grok(texte):
 async def demander_ollama(texte):
     """Appelle un modèle local via Ollama (100% offline)."""
     global historique
+    if not OLLAMA_CONFIGURED:
+        return None
     try:
         # On prépare les messages au format Ollama (compatible OpenAI)
         messages = [{"role": "system", "content": "Tu es JARVIS, l'IA de Tom. Tu utilises actuellement ton module local Ollama. Réponds en français, de façon concise et élégante."}]

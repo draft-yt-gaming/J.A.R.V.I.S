@@ -100,6 +100,12 @@ GROQ_API_KEY=VOTRE_CLE
 SERPAPI_API_KEY=VOTRE_CLE
 NASA_API_KEY=VOTRE_CLE  # optionnelle, DEMO_KEY sinon
 
+# Optionnel : modeles IA locaux via Ollama
+OLLAMA_ENABLED=false
+OLLAMA_PREFER_LOCAL=false
+OLLAMA_URL=http://127.0.0.1:11434
+OLLAMA_MODELS=llama3.1:8b,llama3:8b,mistral:instruct
+
 HA_URL=http://homeassistant.local:8123
 HA_TOKEN=VOTRE_TOKEN
 
@@ -120,6 +126,24 @@ Notes :
 - `GEMINI_API_KEY` accepte une ou plusieurs cles separees par virgule, point-virgule ou retour ligne.
 - Les reglages peuvent ensuite etre modifies depuis le dashboard et sont enregistres dans `jarvis_runtime_settings.json`.
 - En mode public, pense a adapter `DISCORD_REDIRECT_URI` a ton domaine reel.
+
+## Ollama local
+
+Jarvis peut utiliser des modeles locaux exposes par Ollama. Cette integration est separee des fournisseurs cloud :
+- `OLLAMA_ENABLED=true` active l'integration ;
+- `OLLAMA_URL` pointe vers le serveur Ollama, par defaut `http://127.0.0.1:11434` ;
+- `OLLAMA_MODELS` contient une liste de modeles separee par virgule, point-virgule ou retour ligne ;
+- `OLLAMA_PREFER_LOCAL=true` force Jarvis a essayer Ollama avant Gemini/Groq pour les reponses IA generales ;
+- si `OLLAMA_PREFER_LOCAL=false`, Ollama sert de fallback offline quand les fournisseurs cloud echouent.
+
+Exemple d'installation locale :
+
+```bash
+ollama pull llama3.1:8b
+ollama serve
+```
+
+Puis configure `OLLAMA_ENABLED=true` et `OLLAMA_MODELS=llama3.1:8b` dans le dashboard ou dans `.env`.
 
 ## Lancement
 
@@ -199,6 +223,7 @@ Jarvis separe les APIs specialisees des fournisseurs IA. Les APIs publiques ci-d
 | Gemini | Reponses IA principales, raisonnement, vision selon configuration | Oui | `GEMINI_API_KEY` |
 | Groq | Fournisseur IA alternatif / rapide | Oui | `GROQ_API_KEY` |
 | xAI / Grok | Fournisseur IA alternatif et verifications | Oui | `XAI_API_KEY` |
+| Ollama | Modeles IA locaux, fallback offline ou priorite locale | Non | `OLLAMA_ENABLED`, `OLLAMA_URL`, `OLLAMA_MODELS`, `OLLAMA_PREFER_LOCAL` |
 | YouTube Data API | Recherche musicale officielle pour le mini-player | Optionnel | `YOUTUBE_API_KEY` ; fallback scraping si absent ou invalide |
 | SerpAPI | Recherche web visuelle avec liens/images | Oui | `SERPAPI_API_KEY` |
 | NASA APOD | Image astronomique du jour | Optionnel | `NASA_API_KEY` ; `DEMO_KEY` sinon |
