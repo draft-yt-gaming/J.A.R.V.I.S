@@ -169,6 +169,7 @@ let currentAudio: HTMLAudioElement | null = null;
 let isListening = false;
 let speechMode: "wake" | "manual" | null = null;
 let manualCapturePending = false;
+let preserveConversationOnManualStart = false;
 let suppressRecognitionEnd = false;
 let lastWakeRestartAt = 0;
 let currentAssistantName = "J.A.R.V.I.S";
@@ -397,6 +398,21 @@ function nettoyerTexteJarvis(text: string): string {
   return text.replace(/\{[^}]*\}/gs, "").replace(/\s{2,}/g, " ").trim();
 }
 
+function shouldListenForUserReply(text: string): boolean {
+  const normalized = nettoyerTexteJarvis(text).toLowerCase().trim();
+  if (!normalized) return false;
+  if (normalized.endsWith("?")) return true;
+  return /\b(que voulez vous|que veux tu|dites moi|dis moi|repondez|répondez|j.attends votre reponse|j.attends ta reponse|j.attends votre réponse|j.attends ta réponse|voulez vous|veux tu|souhaitez vous|souhaites tu|lequel|laquelle|lesquels|lesquelles|quel choix|quelle option)\b/i.test(normalized);
+}
+
+function listenForUserReplyAfterSpeech(text: string): void {
+  if (shouldListenForUserReply(text)) {
+    window.setTimeout(() => startManualListening({ preserveConversation: true }), 250);
+    return;
+  }
+  startWakeListening();
+}
+
 let errorTimer: ReturnType<typeof setTimeout> | null = null;
 
 function showError(msg: string): void {
@@ -617,7 +633,8 @@ async function handleServerMessage(data: WsMessage): Promise<void> {
   }
 
   if (data.action === "jarvis_audio") {
-    setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text || ""));
+    const spokenText = nettoyerTexteJarvis(data.text || "");
+    setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), spokenText);
     if (data.audio_b64) {
       if (currentAudio) currentAudio.pause();
       if (recognition && isListening) {
@@ -629,19 +646,23 @@ async function handleServerMessage(data: WsMessage): Promise<void> {
       void currentAudio.play().catch(() => {
         showError("Lecture audio navigateur impossible");
         applyState("idle");
-        startWakeListening();
+        listenForUserReplyAfterSpeech(spokenText);
       });
       currentAudio.addEventListener("ended", () => {
         applyState("idle");
         currentAudio = null;
-        startWakeListening();
+        listenForUserReplyAfterSpeech(spokenText);
       }, { once: true });
+    } else {
+      listenForUserReplyAfterSpeech(spokenText);
     }
     return;
   }
 
   if (data.action === "jarvis_response" && typeof data.text === "string") {
-    setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text));
+    const responseText = nettoyerTexteJarvis(data.text);
+    setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), responseText);
+    listenForUserReplyAfterSpeech(responseText);
     return;
   }
 
@@ -832,7 +853,13 @@ if (SpeechRecognitionCtor) {
     finalTranscriptBuffer = "";
     if (speechMode === "manual") {
       applyState("listening");
-      setConversation("");
+      if (preserveConversationOnManualStart) {
+        preserveConversationOnManualStart = false;
+      } else {
+        setConversation("");
+      }
+    } else {
+      preserveConversationOnManualStart = false;
     }
   });
 
@@ -1248,7 +1275,7 @@ function startWakeListening(): void {
   }
 }
 
-function startManualListening(): void {
+function startManualListening(options: { preserveConversation?: boolean } = {}): void {
   if (!recognition) return;
   if (currentAudio) {
     currentAudio.pause();
@@ -1257,16 +1284,22 @@ function startManualListening(): void {
   finalTranscriptBuffer = "";
   manualCapturePending = true;
   speechMode = "manual";
+  preserveConversationOnManualStart = Boolean(options.preserveConversation);
   if (isListening) {
     applyState("listening");
     setMicListening(true);
     setMusicDucking(true);
-    setConversation("");
+    if (preserveConversationOnManualStart) {
+      preserveConversationOnManualStart = false;
+    } else {
+      setConversation("");
+    }
     return;
   }
   try {
     recognition.start();
   } catch {
+    preserveConversationOnManualStart = false;
     showError("Impossible de demarrer le micro");
   }
 }
