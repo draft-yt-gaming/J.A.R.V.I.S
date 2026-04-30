@@ -35,6 +35,7 @@ type BrowserSpeechRecognition = {
   maxAlternatives: number;
   start: () => void;
   stop: () => void;
+  abort?: () => void;
   addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
 };
 
@@ -177,6 +178,7 @@ let speechMode: "wake" | "manual" | null = null;
 let manualCapturePending = false;
 let preserveConversationOnManualStart = false;
 let suppressRecognitionEnd = false;
+let micSuspendedForPageLifecycle = false;
 let lastWakeRestartAt = 0;
 let currentAssistantName = "J.A.R.V.I.S";
 let finalTranscriptBuffer = "";
@@ -416,6 +418,10 @@ function shouldBlockMobileMicroForHttps(): boolean {
   return isAppleMobileDevice() && !window.isSecureContext && !isLocalHttpHost();
 }
 
+function pageCanUseMicrophone(): boolean {
+  return document.visibilityState === "visible" && !micSuspendedForPageLifecycle;
+}
+
 function shouldListenForUserReply(text: string): boolean {
   const normalized = nettoyerTexteJarvis(text).toLowerCase().trim();
   if (!normalized) return false;
@@ -424,6 +430,7 @@ function shouldListenForUserReply(text: string): boolean {
 }
 
 function listenForUserReplyAfterSpeech(text: string): void {
+  if (!pageCanUseMicrophone()) return;
   if (shouldListenForUserReply(text)) {
     window.setTimeout(() => startManualListening({ preserveConversation: true }), 250);
     return;
@@ -942,7 +949,9 @@ if (SpeechRecognitionCtor) {
       speechMode = "wake";
       applyState("idle");
     }
-    window.setTimeout(startWakeListening, 900);
+    if (pageCanUseMicrophone()) {
+      window.setTimeout(startWakeListening, 900);
+    }
   });
 
   recognition.addEventListener("error", ((event: Event) => {
@@ -953,7 +962,7 @@ if (SpeechRecognitionCtor) {
     if (speechError.error !== "no-speech" && speechMode === "manual") {
       showError(`Micro navigateur: ${speechError.error || "erreur inconnue"}`);
     }
-    if (speechMode !== "manual") {
+    if (speechMode !== "manual" && pageCanUseMicrophone()) {
       window.setTimeout(startWakeListening, 1500);
     }
   }) as EventListener);
@@ -1285,7 +1294,7 @@ muteButtonEl.addEventListener("click", () => {
 });
 
 function startWakeListening(): void {
-  if (!recognition || isListening) return;
+  if (!recognition || isListening || !pageCanUseMicrophone()) return;
   const now = Date.now();
   if (now - lastWakeRestartAt < 700) return;
   lastWakeRestartAt = now;
@@ -1300,6 +1309,7 @@ function startWakeListening(): void {
 }
 
 function startManualListening(options: { preserveConversation?: boolean } = {}): void {
+  if (!pageCanUseMicrophone()) return;
   if (shouldBlockMobileMicroForHttps()) {
     showError("Sur iPhone, ouvre JARVIS en HTTPS pour autoriser le micro.");
     return;
@@ -1333,8 +1343,54 @@ function startManualListening(options: { preserveConversation?: boolean } = {}):
 }
 
 micButtonEl.addEventListener("click", () => {
+  micSuspendedForPageLifecycle = false;
   startManualListening();
 });
+
+function stopBrowserMicrophoneForPageLifecycle(): void {
+  micSuspendedForPageLifecycle = true;
+  suppressRecognitionEnd = true;
+  manualCapturePending = false;
+  preserveConversationOnManualStart = false;
+  speechMode = null;
+  finalTranscriptBuffer = "";
+  if (recognition && isListening) {
+    try {
+      if (recognition.abort) {
+        recognition.abort();
+      } else {
+        recognition.stop();
+      }
+    } catch {
+      // Safari peut deja avoir ferme la session micro.
+    }
+  }
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  isListening = false;
+  setMicListening(false);
+  setMusicDucking(false);
+  applyState("idle");
+}
+
+function resumeBrowserMicrophoneAfterPageLifecycle(): void {
+  micSuspendedForPageLifecycle = false;
+  suppressRecognitionEnd = false;
+  startWakeListening();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    stopBrowserMicrophoneForPageLifecycle();
+    return;
+  }
+  resumeBrowserMicrophoneAfterPageLifecycle();
+});
+
+window.addEventListener("pagehide", stopBrowserMicrophoneForPageLifecycle);
+window.addEventListener("beforeunload", stopBrowserMicrophoneForPageLifecycle);
 
 dashboardButtonEl.addEventListener("click", () => {
   if (dashboardOpen) {
@@ -1444,6 +1500,8 @@ renderDebugState();
 injectVisionButton();
 scheduleHttpPolling(400);
 connect();
-startWakeListening();
+if (pageCanUseMicrophone()) {
+  startWakeListening();
+}
 void fetchAuthStatus();
 handleUrlFeedback();
