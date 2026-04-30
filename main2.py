@@ -21,6 +21,7 @@ import html
 import shutil
 import sys
 import unicodedata
+import ipaddress
 from pathlib import Path
 from datetime import datetime
 from collections import deque
@@ -602,6 +603,16 @@ def discord_redirect_uri_for_request():
     if env_value_is_configured(DISCORD_REDIRECT_URI):
         return DISCORD_REDIRECT_URI
     return request_based_uri
+
+
+def request_from_private_network():
+    forwarded_for = str(flask_request.headers.get("X-Forwarded-For", "")).split(",")[0].strip()
+    remote_ip = forwarded_for or flask_request.remote_addr or ""
+    try:
+        ip = ipaddress.ip_address(remote_ip)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback
 
 def is_owner_authenticated():
     user = session.get("discord_user")
@@ -5660,6 +5671,41 @@ def start_http_interface_server():
             daemon=True,
         ).start()
         return jsonify({"ok": True})
+
+    @app.post("/api/extension/summarize")
+    def api_extension_summarize():
+        if not request_from_private_network() and not is_owner_authenticated():
+            return jsonify({"error": "extension_access_denied"}), 403
+
+        payload = flask_request.get_json(silent=True) or {}
+        page_title = str(payload.get("title", "")).strip()[:300]
+        page_url = str(payload.get("url", "")).strip()[:1000]
+        page_text = str(payload.get("text", "")).strip()
+        if not page_text:
+            return jsonify({"error": "empty_page_text"}), 400
+
+        max_chars = 30000
+        truncated = len(page_text) > max_chars
+        page_text = page_text[:max_chars]
+        prompt = (
+            "Resume clairement en francais la page web ci-dessous. "
+            "Donne d'abord un resume court, puis 5 points importants maximum. "
+            "Si la page contient des actions, prix, dates ou avertissements, indique-les.\n\n"
+            f"Titre: {page_title or 'Sans titre'}\n"
+            f"URL: {page_url or 'URL inconnue'}\n"
+            f"Texte de la page:\n{page_text}"
+        )
+        try:
+            summary = asyncio.run(demander_ia(prompt))
+        except Exception as e:
+            print(f"[EXTENSION] Erreur resume page : {e}")
+            return jsonify({"error": "summarize_failed", "detail": str(e)}), 500
+
+        return jsonify({
+            "ok": True,
+            "summary": summary,
+            "truncated": truncated,
+        })
 
     @app.get("/api/client/events")
     def api_client_events():

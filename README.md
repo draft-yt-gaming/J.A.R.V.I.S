@@ -214,6 +214,22 @@ npm run build
 
 Le build genere `frontend/dist/`, servi ensuite par Flask en mode VM/headless.
 
+
+## Extension Chrome
+
+Une extension Chrome non publiee est fournie dans `chrome-extension/`. Elle permet de lire le texte de l'onglet actif et de demander a Jarvis un resume de la page.
+
+Installation locale :
+
+```text
+1. Ouvrir chrome://extensions
+2. Activer le mode developpeur
+3. Cliquer sur Charger l'extension non empaquetee
+4. Selectionner le dossier chrome-extension/ du projet
+```
+
+Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup.
+
 ## Fichiers runtime a ne pas versionner
 
 Ces fichiers ne devraient pas contenir d'informations sensibles dans le depot :

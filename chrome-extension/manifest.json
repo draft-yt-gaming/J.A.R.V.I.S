@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "J.A.R.V.I.S Page Assistant",
+  "description": "Resume la page Chrome active avec le serveur J.A.R.V.I.S.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "J.A.R.V.I.S",
+    "default_popup": "popup.html"
+  }
+}
