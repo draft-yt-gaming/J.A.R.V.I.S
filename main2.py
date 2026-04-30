@@ -4986,14 +4986,34 @@ async def resoudre_commandes_locales(texte):
 
     return None
 
+def requete_recette_visuelle_locale(texte):
+    t = str(texte or "").lower().strip()
+    if not re.search(r"\b(recette|cuisine|comment faire|preparer|préparer)\b", t):
+        return None
+    query = re.sub(r"\b(donne moi|donne-moi|peux tu|peux-tu|trouve moi|cherche moi|une|un)\b", " ", texte, flags=re.IGNORECASE)
+    query = re.sub(r"\s+", " ", query).strip(" ,.!?;:")
+    if "recette" not in query.lower():
+        query = f"recette {query}"
+    return query
+
+
+async def envoyer_recherche_visuelle_web(query, *, inclure_texte=False):
+    try:
+        details = await asyncio.to_thread(recherche_web_serpapi_details, query)
+        payload = {
+            "query": query,
+            "items": details.get("items", []),
+            "images": details.get("images", []),
+        }
+        if inclure_texte:
+            payload["text"] = details.get("text", "")
+        await send_web_action("web_results", **payload)
+    except Exception as e:
+        print(f"[WEB] Erreur panneau visuel : {e}")
+
+
 def requete_visuelle_web_locale(texte):
     t = str(texte or "").lower().strip()
-    if re.search(r"\b(recette|cuisine|comment faire|preparer|préparer)\b", t):
-        query = re.sub(r"\b(donne moi|peux tu|peux-tu|trouve moi|cherche moi|une|un)\b", " ", texte, flags=re.IGNORECASE)
-        query = re.sub(r"\s+", " ", query).strip(" ,.!?;:")
-        if "recette" not in query.lower():
-            query = f"recette {query}"
-        return query
     if any(k in t for k in ["cherche sur internet", "recherche web", "recherche internet", "cherche moi", "trouve moi"]):
         query = re.sub(r"\b(cherche sur internet|recherche web|recherche internet|cherche moi|trouve moi|donne moi|peux tu|peux-tu)\b", " ", texte, flags=re.IGNORECASE)
         query = re.sub(r"\s+", " ", query).strip(" ,.!?;:")
@@ -5070,6 +5090,9 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
     json_blocks = re.findall(r'\{.*?\}', reponse, re.DOTALL)
     
     if not json_blocks:
+        recette_web_query = requete_recette_visuelle_locale(texte_utilisateur)
+        if recette_web_query:
+            asyncio.create_task(envoyer_recherche_visuelle_web(recette_web_query))
         await parler(reponse)
         _skip_pc_audio = False
         return

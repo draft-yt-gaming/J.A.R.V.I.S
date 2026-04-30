@@ -192,7 +192,7 @@ Quand Jarvis effectue une recherche web, l'interface affiche un panneau lateral 
 - des cartes de resultats avec titres, extraits et liens cliquables ;
 - un bouton pour masquer le panneau.
 
-Les demandes de type `donne moi une recette de pate` sont converties en recherche web visuelle afin d'afficher des sources et images en plus de la reponse vocale.
+Les demandes de type `donne moi une recette de pate` gardent une reponse Jarvis directe et peuvent afficher en complement un panneau visuel avec sources, images et liens cliquables.
 
 ## Ecoute vocale
 
