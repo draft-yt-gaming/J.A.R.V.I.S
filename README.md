@@ -28,6 +28,7 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - Controle Home Assistant
 - Support Proxmox
 - Integrations Emby, YouTube, Blagues API, SerpAPI, Groq, xAI selon configuration
+- APIs publiques gratuites separees de l IA : Open-Meteo, Open Food Facts, Nager.Date, Wikipedia, OpenStreetMap, Open Library et NASA APOD
 - Vision navigateur et capture d'ecran
 - Vision camera locale via OpenCV
 - Mini-player YouTube integre dans l'interface
@@ -97,6 +98,7 @@ YOUTUBE_API_KEY=VOTRE_CLE
 XAI_API_KEY=VOTRE_CLE
 GROQ_API_KEY=VOTRE_CLE
 SERPAPI_API_KEY=VOTRE_CLE
+NASA_API_KEY=VOTRE_CLE  # optionnelle, DEMO_KEY sinon
 
 HA_URL=http://homeassistant.local:8123
 HA_TOKEN=VOTRE_TOKEN
@@ -187,6 +189,21 @@ Important :
 Cela permet a l'interface de continuer a recevoir les reponses meme quand seul le port HTTP est expose publiquement.
 
 
+
+## APIs publiques gratuites
+
+Jarvis interroge certaines APIs publiques avant Gemini/Groq, uniquement quand la demande correspond clairement a leur domaine. Cela evite de melanger les integrations avec les fournisseurs IA generaux.
+
+APIs ajoutees :
+- Open-Meteo : meteo et pluie, sans cle ;
+- Open Food Facts : produit, code-barres, Nutri-Score, sans cle ;
+- Nager.Date : jours feries, sans cle ;
+- Wikipedia/Wikimedia : resumes encyclopediques, sans cle ;
+- OpenStreetMap/Nominatim : adresses et coordonnees, sans cle avec User-Agent et usage leger ;
+- Open Library : livres, auteurs et ISBN, sans cle ;
+- NASA APOD : image astronomique du jour, avec `NASA_API_KEY` optionnelle ou `DEMO_KEY` par defaut.
+
+Exemples : `meteo demain a Paris`, `jours feries en France`, `wikipedia Nikola Tesla`, `nutriscore coca cola`, `isbn 9782070368228`, `image nasa du jour`, `coordonnees de la tour eiffel`.
 
 ## Web app mobile Apple/iOS
 

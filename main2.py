@@ -165,6 +165,7 @@ DEFAULT_SETTINGS = {
     "HOME_LOCATION_NAME": os.getenv("HOME_LOCATION_NAME", ""),
     "SERPAPI_API_KEY": os.getenv("SERPAPI_API_KEY", ""),
     "GROQ_API_KEY": os.getenv("GROQ_API_KEY", ""),
+    "NASA_API_KEY": os.getenv("NASA_API_KEY", ""),
     "EMBY_URL": os.getenv("EMBY_URL", ""),
     "EMBY_API_KEY": os.getenv("EMBY_API_KEY", ""),
     "EMBY_USER_ID": os.getenv("EMBY_USER_ID", ""),
@@ -189,6 +190,7 @@ SENSITIVE_SETTINGS = {
     "HA_TOKEN",
     "SERPAPI_API_KEY",
     "GROQ_API_KEY",
+    "NASA_API_KEY",
     "EMBY_API_KEY",
     "PROXMOX_TOKEN_SECRET",
     "DISCORD_CLIENT_SECRET",
@@ -239,6 +241,7 @@ HA_WEATHER_ENTITY = ""
 HOME_LOCATION_NAME = ""
 SERPAPI_API_KEY = ""
 GROQ_API_KEY = ""
+NASA_API_KEY = ""
 EMBY_URL = ""
 EMBY_API_KEY = ""
 EMBY_USER_ID = ""
@@ -260,6 +263,7 @@ XAI_CONFIGURED = False
 HA_CONFIGURED = False
 SERPAPI_CONFIGURED = False
 GROQ_CONFIGURED = False
+NASA_CONFIGURED = False
 EMBY_CONFIGURED = False
 PROXMOX_CONFIGURED = False
 DISCORD_CONFIGURED = False
@@ -272,13 +276,13 @@ app = None
 
 def refresh_runtime_config():
     global ASSISTANT_NAME, GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_MODEL_KEY_BLOCKED_UNTIL, BLAGUES_API_TOKEN, YOUTUBE_API_KEY, XAI_API_KEY
-    global HA_URL, HA_TOKEN, HA_WEATHER_ENTITY, HOME_LOCATION_NAME, SERPAPI_API_KEY, GROQ_API_KEY
+    global HA_URL, HA_TOKEN, HA_WEATHER_ENTITY, HOME_LOCATION_NAME, SERPAPI_API_KEY, GROQ_API_KEY, NASA_API_KEY
     global EMBY_URL, EMBY_API_KEY, EMBY_USER_ID, EMBY_USERNAME
     global PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_VERIFY_SSL
     global DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI
     global JARVIS_SESSION_SECRET
     global GEMINI_CONFIGURED, BLAGUES_CONFIGURED, YOUTUBE_CONFIGURED, XAI_CONFIGURED, HA_CONFIGURED
-    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
+    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, NASA_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
     global client, GEMINI_CLIENTS, blagues_client, grok_client, groq_client, HA_HEADERS
 
     settings = RUNTIME_SETTINGS
@@ -293,6 +297,7 @@ def refresh_runtime_config():
     HOME_LOCATION_NAME = settings.get("HOME_LOCATION_NAME", "")
     SERPAPI_API_KEY = settings.get("SERPAPI_API_KEY", "")
     GROQ_API_KEY = settings.get("GROQ_API_KEY", "")
+    NASA_API_KEY = settings.get("NASA_API_KEY", "")
     EMBY_URL = str(settings.get("EMBY_URL", "")).strip()
     EMBY_API_KEY = str(settings.get("EMBY_API_KEY", "")).strip()
     EMBY_USER_ID = str(settings.get("EMBY_USER_ID", "")).strip()
@@ -318,6 +323,7 @@ def refresh_runtime_config():
     HA_CONFIGURED = env_value_is_configured(HA_URL) and env_value_is_configured(HA_TOKEN)
     SERPAPI_CONFIGURED = env_value_is_configured(SERPAPI_API_KEY)
     GROQ_CONFIGURED = env_value_is_configured(GROQ_API_KEY)
+    NASA_CONFIGURED = env_value_is_configured(NASA_API_KEY)
     EMBY_CONFIGURED = env_value_is_configured(EMBY_URL) and env_value_is_configured(EMBY_API_KEY)
     PROXMOX_CONFIGURED = all(
         env_value_is_configured(v)
@@ -366,6 +372,7 @@ def get_service_config_flags():
         "home_assistant": HA_CONFIGURED,
         "serpapi": SERPAPI_CONFIGURED,
         "groq": GROQ_CONFIGURED,
+        "nasa": True,
         "emby": EMBY_CONFIGURED,
         "proxmox": PROXMOX_CONFIGURED,
         "discord": DISCORD_CONFIGURED,
@@ -504,6 +511,19 @@ def _test_proxmox_status():
         return _status_payload("error", str(e))
 
 
+
+def _test_nasa_status():
+    try:
+        r = requests.get(
+            "https://api.nasa.gov/planetary/apod",
+            params={"api_key": NASA_API_KEY if NASA_CONFIGURED else "DEMO_KEY"},
+            timeout=4,
+        )
+        detail = f"HTTP {r.status_code}" + (f" via {mask_secret(NASA_API_KEY)}" if NASA_CONFIGURED else " via DEMO_KEY")
+        return _status_payload("ok" if _service_ok(r) else "error", detail)
+    except Exception as e:
+        return _status_payload("error", str(e))
+
 def _test_discord_status():
     if not DISCORD_CONFIGURED:
         return _status_payload("missing")
@@ -527,6 +547,7 @@ def get_service_health_flags(force_refresh=False):
         "home_assistant": _test_home_assistant_status(),
         "serpapi": _test_serpapi_status(),
         "groq": _test_groq_status(),
+        "nasa": _test_nasa_status(),
         "emby": _test_emby_status(),
         "proxmox": _test_proxmox_status(),
         "discord": _test_discord_status(),
@@ -556,6 +577,7 @@ def get_private_runtime_settings():
         "HOME_LOCATION_NAME": HOME_LOCATION_NAME,
         "SERPAPI_API_KEY": SERPAPI_API_KEY,
         "GROQ_API_KEY": GROQ_API_KEY,
+        "NASA_API_KEY": NASA_API_KEY,
         "EMBY_URL": EMBY_URL,
         "EMBY_API_KEY": EMBY_API_KEY,
         "EMBY_USER_ID": EMBY_USER_ID,
@@ -4083,6 +4105,335 @@ def reponse_locale(texte):
         return "Bonjour Tom. Je suis en ligne, bien que mes capacités soient actuellement restreintes."
     return None
     
+def normaliser_commande_api(texte):
+    value = str(texte or "").lower().replace("’", "'")
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(c for c in value if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def jarvis_api_headers():
+    return {"User-Agent": "JARVIS-VM/1.0 (local assistant; contact: local)"}
+
+
+def nettoyer_requete_generique(texte, mots):
+    query = str(texte or "")
+    for mot in mots:
+        query = re.sub(mot, " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"[?!.;:]+", " ", query)
+    return re.sub(r"\s+", " ", query).strip(" ,'")
+
+
+def geocoder_lieu_open_meteo(lieu):
+    r = requests.get(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": lieu, "count": 1, "language": "fr", "format": "json"},
+        headers=jarvis_api_headers(),
+        timeout=6,
+    )
+    r.raise_for_status()
+    results = r.json().get("results") or []
+    if not results:
+        return None
+    item = results[0]
+    label = ", ".join(part for part in [item.get("name"), item.get("admin1"), item.get("country")] if part)
+    return float(item["latitude"]), float(item["longitude"]), label or lieu
+
+
+def extraire_lieu_depuis_commande(texte):
+    raw = str(texte or "").strip()
+    t = normaliser_commande_api(raw)
+    patterns = [
+        r"(?:a|à|sur|pour|de|du|dans)\s+([a-zA-ZÀ-ÿ' -]{2,})$",
+        r"meteo\s+([a-zA-ZÀ-ÿ' -]{2,})$",
+        r"temps\s+([a-zA-ZÀ-ÿ' -]{2,})$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, raw, flags=re.IGNORECASE)
+        if match:
+            lieu = re.sub(r"\b(aujourd'hui|demain|maintenant|cette semaine)\b", " ", match.group(1), flags=re.IGNORECASE)
+            lieu = re.sub(r"\s+", " ", lieu).strip(" ,?!.;:")
+            if len(lieu) >= 2:
+                return lieu
+    return HOME_LOCATION_NAME or "Paris"
+
+
+def resoudre_meteo_api(texte):
+    t = normaliser_commande_api(texte)
+    if not any(k in t for k in ["meteo", "temperature", "temps", "pleuvoir", "pluie", "vent"]):
+        return None
+    try:
+        lieu = extraire_lieu_depuis_commande(texte)
+        geo = geocoder_lieu_open_meteo(lieu)
+        if not geo:
+            return f"Je n'ai pas trouve la ville {lieu}."
+        lat, lon, label = geo
+        r = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m",
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
+                "forecast_days": 2,
+                "timezone": "auto",
+            },
+            headers=jarvis_api_headers(),
+            timeout=7,
+        )
+        r.raise_for_status()
+        data = r.json()
+        current = data.get("current") or {}
+        daily = data.get("daily") or {}
+        temp = current.get("temperature_2m")
+        humidity = current.get("relative_humidity_2m")
+        rain = current.get("precipitation")
+        wind = current.get("wind_speed_10m")
+        maxs = daily.get("temperature_2m_max") or []
+        mins = daily.get("temperature_2m_min") or []
+        probs = daily.get("precipitation_probability_max") or []
+        parts = [f"Meteo pour {label} : actuellement {temp} degres" if temp is not None else f"Meteo pour {label}."]
+        if humidity is not None:
+            parts.append(f"humidite {humidity} pour cent")
+        if rain is not None:
+            parts.append(f"pluie {rain} millimetre")
+        if wind is not None:
+            parts.append(f"vent {wind} kilometres heure")
+        if maxs and mins:
+            parts.append(f"aujourd'hui entre {mins[0]} et {maxs[0]} degres")
+        if probs:
+            parts.append(f"risque de pluie maximum {probs[0]} pour cent")
+        if "demain" in t and len(maxs) > 1 and len(mins) > 1:
+            parts.append(f"demain entre {mins[1]} et {maxs[1]} degres, pluie {probs[1] if len(probs) > 1 else 0} pour cent")
+        return ", ".join(parts) + "."
+    except Exception as e:
+        print(f"[OPEN-METEO] Erreur : {e}")
+        return "Je n'arrive pas a recuperer la meteo pour le moment."
+
+
+def resoudre_jours_feries_api(texte):
+    t = normaliser_commande_api(texte)
+    if not any(k in t for k in ["ferie", "jour ferie", "jours feries", "fete nationale"]):
+        return None
+    try:
+        country = "FR"
+        country_match = re.search(r"\b([A-Z]{2})\b", str(texte or ""))
+        if country_match:
+            country = country_match.group(1).upper()
+        year_match = re.search(r"\b(20\d{2})\b", t)
+        year = int(year_match.group(1)) if year_match else datetime.now().year
+        r = requests.get(f"https://date.nager.at/api/v3/PublicHolidays/{year}/{country}", timeout=7)
+        r.raise_for_status()
+        holidays = r.json()
+        if not holidays:
+            return f"Je n'ai pas trouve de jours feries pour {country} en {year}."
+        today = datetime.now().date()
+        upcoming = [h for h in holidays if datetime.fromisoformat(h["date"]).date() >= today]
+        selected = upcoming[:4] if upcoming else holidays[:4]
+        lignes = [f"Prochains jours feries {country} en {year}"]
+        for h in selected:
+            lignes.append(f"{h.get('localName') or h.get('name')} le {h.get('date')}")
+        return ": ".join([lignes[0], "; ".join(lignes[1:])]) + "."
+    except Exception as e:
+        print(f"[NAGER] Erreur : {e}")
+        return "Je n'arrive pas a recuperer les jours feries pour le moment."
+
+
+def resoudre_wikipedia_api(texte):
+    t = normaliser_commande_api(texte)
+    if not any(k in t for k in ["wikipedia", "wiki", "resume moi", "résume moi", "qui est", "c'est quoi"]):
+        return None
+    if any(k in t for k in ["recette", "youtube", "musique", "meteo", "jour ferie"]):
+        return None
+    query = nettoyer_requete_generique(texte, [r"wikipedia", r"wiki", r"resume moi", r"résume moi", r"qui est", r"c'est quoi", r"qu'est ce que", r"qu'est-ce que", r"donne moi", r"explique moi"])
+    if len(query) < 2:
+        return None
+    try:
+        search = requests.get(
+            "https://fr.wikipedia.org/w/rest.php/v1/search/page",
+            params={"q": query, "limit": 1},
+            headers=jarvis_api_headers(),
+            timeout=7,
+        )
+        search.raise_for_status()
+        pages = search.json().get("pages") or []
+        if not pages:
+            return f"Je n'ai pas trouve de page Wikipedia pour {query}."
+        title = pages[0].get("title") or query
+        summary = requests.get(
+            f"https://fr.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title, safe='')}",
+            headers=jarvis_api_headers(),
+            timeout=7,
+        )
+        summary.raise_for_status()
+        data = summary.json()
+        extract = data.get("extract") or "Je n'ai pas trouve de resume lisible."
+        url = (data.get("content_urls") or {}).get("desktop", {}).get("page", "")
+        return f"Wikipedia, {data.get('title', title)} : {extract[:900]}" + (f" Source : {url}" if url else "")
+    except Exception as e:
+        print(f"[WIKIPEDIA] Erreur : {e}")
+        return None
+
+
+def resoudre_openfoodfacts_api(texte):
+    t = normaliser_commande_api(texte)
+    if not any(k in t for k in ["open food", "openfood", "nutriscore", "nutri score", "code barre", "barcode", "produit alimentaire", "allergene", "allergène"]):
+        return None
+    try:
+        barcode = re.search(r"\b(\d{8,14})\b", t)
+        product = None
+        if barcode:
+            r = requests.get(
+                f"https://world.openfoodfacts.org/api/v2/product/{barcode.group(1)}.json",
+                params={"fields": "product_name,brands,nutriscore_grade,nova_group,allergens_tags,ingredients_text_fr,nutriments"},
+                headers=jarvis_api_headers(),
+                timeout=7,
+            )
+            r.raise_for_status()
+            payload = r.json()
+            if payload.get("status") == 1:
+                product = payload.get("product") or {}
+        else:
+            query = nettoyer_requete_generique(texte, [r"open food facts", r"openfoodfacts", r"open food", r"nutriscore", r"nutri score", r"produit alimentaire", r"analyse", r"cherche", r"donne moi"])
+            if len(query) < 2:
+                return None
+            r = requests.get(
+                "https://world.openfoodfacts.org/cgi/search.pl",
+                params={"search_terms": query, "search_simple": 1, "action": "process", "json": 1, "page_size": 1},
+                headers=jarvis_api_headers(),
+                timeout=7,
+            )
+            r.raise_for_status()
+            products = r.json().get("products") or []
+            product = products[0] if products else None
+        if not product:
+            return "Je n'ai pas trouve ce produit dans Open Food Facts."
+        name = product.get("product_name") or "produit inconnu"
+        brand = product.get("brands") or "marque inconnue"
+        nutri = (product.get("nutriscore_grade") or "inconnu").upper()
+        nova = product.get("nova_group") or "inconnu"
+        allergens = product.get("allergens_tags") or []
+        allergen_text = ", ".join(a.replace("en:", "") for a in allergens[:4]) if allergens else "aucun allergene signale"
+        return f"Open Food Facts : {name}, {brand}. Nutri-Score {nutri}, groupe NOVA {nova}. Allergènes : {allergen_text}."
+    except Exception as e:
+        print(f"[OPENFOODFACTS] Erreur : {e}")
+        return "Je n'arrive pas a lire Open Food Facts pour le moment."
+
+
+def resoudre_openlibrary_api(texte):
+    t = normaliser_commande_api(texte)
+    if not any(k in t for k in ["isbn", "livre", "open library", "auteur"]):
+        return None
+    if any(k in t for k in ["ecris", "écris", "redige", "rédige"]):
+        return None
+    try:
+        isbn = re.search(r"\b(?:97[89][ -]?)?\d[\d -]{8,16}[\dXx]\b", str(texte or ""))
+        if isbn:
+            clean_isbn = re.sub(r"[^0-9Xx]", "", isbn.group(0))
+            r = requests.get(
+                f"https://openlibrary.org/isbn/{clean_isbn}.json",
+                headers=jarvis_api_headers(),
+                timeout=7,
+            )
+            r.raise_for_status()
+            book = r.json()
+            title = book.get("title", "titre inconnu")
+            year = book.get("publish_date", "date inconnue")
+            publishers = ", ".join(book.get("publishers", [])[:2]) or "editeur inconnu"
+            return f"Open Library : ISBN {clean_isbn}, {title}, publie {year}, editeur {publishers}."
+        query = nettoyer_requete_generique(texte, [r"open library", r"cherche", r"livre", r"auteur", r"donne moi", r"infos? sur"])
+        if len(query) < 2:
+            return None
+        r = requests.get(
+            "https://openlibrary.org/search.json",
+            params={"q": query, "limit": 1},
+            headers=jarvis_api_headers(),
+            timeout=7,
+        )
+        r.raise_for_status()
+        docs = r.json().get("docs") or []
+        if not docs:
+            return f"Je n'ai pas trouve de livre pour {query}."
+        book = docs[0]
+        authors = ", ".join(book.get("author_name", [])[:3]) or "auteur inconnu"
+        year = book.get("first_publish_year", "date inconnue")
+        return f"Open Library : {book.get('title', query)}, par {authors}, premiere publication {year}."
+    except Exception as e:
+        print(f"[OPENLIBRARY] Erreur : {e}")
+        return "Je n'arrive pas a consulter Open Library pour le moment."
+
+
+def resoudre_nasa_api(texte):
+    t = normaliser_commande_api(texte)
+    if not any(k in t for k in ["nasa", "apod", "image du jour", "photo du jour", "astronomie"]):
+        return None
+    try:
+        r = requests.get(
+            "https://api.nasa.gov/planetary/apod",
+            params={"api_key": NASA_API_KEY if NASA_CONFIGURED else "DEMO_KEY"},
+            headers=jarvis_api_headers(),
+            timeout=12,
+        )
+        r.raise_for_status()
+        data = r.json()
+        title = data.get("title", "image NASA du jour")
+        explanation = data.get("explanation", "")
+        url = data.get("hdurl") or data.get("url") or ""
+        return f"NASA APOD : {title}. {explanation[:850]}" + (f" Image : {url}" if url else "")
+    except Exception as e:
+        print(f"[NASA] Erreur : {e}")
+        return "Je n'arrive pas a recuperer l'image NASA du jour pour le moment."
+
+
+def resoudre_openstreetmap_api(texte):
+    t = normaliser_commande_api(texte)
+    if not any(k in t for k in ["adresse", "coordonnees", "coordonnées", "openstreetmap", "osm", "localise", "geocode"]):
+        return None
+    try:
+        query = nettoyer_requete_generique(texte, [r"openstreetmap", r"osm", r"adresse de", r"coordonnees de", r"coordonnées de", r"localise", r"geocode", r"trouve", r"cherche"])
+        query = re.sub(r"^(la|le|les|l'|un|une|des)\s+", "", query, flags=re.IGNORECASE).strip()
+        if len(query) < 3:
+            return None
+        params = {"q": query, "format": "jsonv2", "limit": 1, "addressdetails": 1, "accept-language": "fr"}
+        if not re.search(r"\b(maroc|belgique|suisse|canada|usa|etats-unis|allemagne|espagne|italie|royaume-uni)\b", normaliser_commande_api(query)):
+            params["countrycodes"] = "fr"
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params=params,
+            headers=jarvis_api_headers(),
+            timeout=8,
+        )
+        r.raise_for_status()
+        results = r.json()
+        if not results:
+            return f"Je n'ai pas trouve {query} dans OpenStreetMap."
+        item = results[0]
+        return f"OpenStreetMap : {item.get('display_name', query)}. Coordonnees : latitude {item.get('lat')}, longitude {item.get('lon')}."
+    except Exception as e:
+        print(f"[OSM] Erreur : {e}")
+        return "Je n'arrive pas a interroger OpenStreetMap pour le moment."
+
+
+def resoudre_apis_publiques_localement(texte):
+    resolvers = [
+        resoudre_meteo_api,
+        resoudre_jours_feries_api,
+        resoudre_openfoodfacts_api,
+        resoudre_openlibrary_api,
+        resoudre_nasa_api,
+        resoudre_openstreetmap_api,
+        resoudre_wikipedia_api,
+    ]
+    for resolver in resolvers:
+        try:
+            reponse = resolver(texte)
+            if reponse:
+                return reponse
+        except Exception as e:
+            print(f"[API] {resolver.__name__} erreur : {e}")
+    return None
+
+
 def resoudre_math_localement(texte):
     """Résout des calculs simples localement sans appeler l'IA."""
     t = texte.lower().replace("?", "").strip()
@@ -5122,6 +5473,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
     if not reponse: reponse = resoudre_francais_localement(texte_utilisateur)
     if not reponse: reponse = resoudre_conversion_localement(texte_utilisateur)
     if not reponse: reponse = resoudre_traduction_localement(texte_utilisateur)
+    if not reponse: reponse = resoudre_apis_publiques_localement(texte_utilisateur)
     if not reponse:
         web_query = requete_visuelle_web_locale(texte_utilisateur)
         if web_query:
