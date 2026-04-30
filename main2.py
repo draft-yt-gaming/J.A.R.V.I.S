@@ -4181,19 +4181,20 @@ def geocoder_lieu_open_meteo(lieu):
 
 def extraire_lieu_depuis_commande(texte):
     raw = str(texte or "").strip()
-    t = normaliser_commande_api(raw)
-    patterns = [
-        r"(?:a|à|sur|pour|de|du|dans)\s+([a-zA-ZÀ-ÿ' -]{2,})$",
-        r"meteo\s+([a-zA-ZÀ-ÿ' -]{2,})$",
-        r"temps\s+([a-zA-ZÀ-ÿ' -]{2,})$",
+    cleaned = raw
+    replacements = [
+        r"\b(?:donne moi|donne-moi|dis moi|dis-moi|quelle est|quel est|c'est quoi|comment est|est ce qu|est-ce qu|il va|elle va|va t il|va-t-il)\b",
+        r"\b(?:la|le|les|du|de la|des|un|une)\b",
+        r"\b(?:meteo|météo|temperature|température|temps|prevision|prévision|previsions|prévisions|pleuvoir|pluie|vent)\b",
+        r"\b(?:aujourd'hui|demain|maintenant|cette semaine|ce matin|ce soir|cet apres midi|cet après midi)\b",
     ]
-    for pattern in patterns:
-        match = re.search(pattern, raw, flags=re.IGNORECASE)
-        if match:
-            lieu = re.sub(r"\b(aujourd'hui|demain|maintenant|cette semaine)\b", " ", match.group(1), flags=re.IGNORECASE)
-            lieu = re.sub(r"\s+", " ", lieu).strip(" ,?!.;:")
-            if len(lieu) >= 2:
-                return lieu
+    for pattern in replacements:
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:a|à|sur|pour|dans|en)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[?!.;:]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,'")
+    if len(cleaned) >= 2:
+        return cleaned
     return HOME_LOCATION_NAME or "Paris"
 
 
