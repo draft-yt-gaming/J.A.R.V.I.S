@@ -88,6 +88,32 @@ Notes par integration :
 - WebApp iPhone/iPad : le micro doit etre ouvert en HTTPS ; la charge principale reste cote serveur Jarvis.
 - Ollama : c'est le seul module qui peut vraiment changer la taille de la machine necessaire. Choisir le modele selon la RAM disponible.
 
+
+### Mesures observees sur la VM de test
+
+Mesures realisees sur la VM Debian du projet : 2 vCPU KVM/QEMU, 3.8 Go de RAM, disque 19 Go. Elles donnent un ordre d'idee, pas une garantie de performance universelle.
+
+| Mesure | Resultat observe |
+| --- | --- |
+| Jarvis au repos, memoire systemd | environ 137 Mo |
+| Process Python au repos, RSS | environ 186 a 190 Mo |
+| RAM disponible sur la VM apres demarrage | environ 3.3 Go disponibles |
+| Taille du projet complet | environ 913 Mo |
+| `venv/` Python | environ 616 Mo |
+| `frontend/node_modules/` | environ 79 Mo |
+| `frontend/dist/` servi par Flask | environ 676 Ko |
+
+Benchmark local sans appel IA externe, depuis `127.0.0.1` :
+
+| Scenario | Resultat observe | Note |
+| --- | --- | --- |
+| 60 requetes sur `/` | environ 827 req/s, latence moyenne 1.2 ms | Page web deja build. |
+| 60 requetes sur `/manifest.webmanifest` | environ 882 req/s, latence moyenne 1.1 ms | Fichier statique tres leger. |
+| 250 requetes concurrentes sur `/api/auth/status` avec 10 workers | environ 988 req/s, latence moyenne 9.8 ms | Cache services chaud. |
+| Premiere verification `/api/auth/status` apres cache froid | pic possible autour de 2 s | Peut tester les services configures, donc ce n'est pas la latence normale. |
+
+Ces tests ne mesurent pas les temps de reponse Gemini/Groq/xAI/SerpAPI/YouTube, car ils dependent surtout des APIs externes et du reseau. Pour Ollama, la charge depend presque entierement du modele local choisi.
+
 ## Installation
 
 ### 1. Cloner le projet
