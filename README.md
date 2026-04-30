@@ -449,20 +449,9 @@ Le build genere `frontend/dist/`, servi ensuite par Flask en mode VM/headless.
 
 ## Extension Chrome
 
-Une extension Chrome non publiee est fournie dans `chrome-extension/`. Elle permet de lire le texte de l'onglet actif et de demander a Jarvis un resume de la page.
+Une extension Chrome non publiee permet de lire le texte de l'onglet actif et de demander a Jarvis un resume de la page.
 
-Le moyen le plus simple pour l'installer est de telecharger le ZIP fourni dans les assets de la derniere GitHub Release. Le dossier `chrome-extension/` reste disponible comme code source pour les developpeurs.
-
-Installation locale depuis le dossier source :
-
-```text
-1. Ouvrir chrome://extensions
-2. Activer le mode developpeur
-3. Cliquer sur Charger l'extension non empaquetee
-4. Selectionner le dossier chrome-extension/ du projet
-```
-
-Installation depuis un ZIP GitHub Release :
+Installation depuis le ZIP fourni dans la derniere GitHub Release :
 
 ```text
 1. Telecharger jarvis-chrome-extension-*.zip dans la release GitHub
@@ -480,27 +469,11 @@ Si l'extension est utilisee hors reseau local avec un domaine public, renseigner
 
 Apres generation du resume, les boutons de lecture permettent d'ecouter, mettre en pause/reprendre ou arreter un MP3 genere par la VM avec la meme voix Edge TTS que Jarvis (`fr-FR-HenriNeural`). Le bouton `Copier selection` copie dans le presse-papiers le texte selectionne dans l'onglet actif.
 
-## Fichiers runtime a ne pas versionner
-
-Ces fichiers ne devraient pas contenir d'informations sensibles dans le depot :
-- `.env`
-- `venv/`
-- `frontend/node_modules/`
-- `__pycache__/`
-- `*.pyc`
-- `jarvis_memoire.json`
-- `jarvis_runtime_settings.json`
-- `frontend/.vite/`
-- `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`
-- fichiers audio/image temporaires Jarvis
-- images generees dans `generated_images/`
-
-## Limitations / remarques
+## Remarques
 
 - La vision ecran/camera depend fortement de Gemini quand elle est active.
 - Si Ollama n'est pas lance localement, le fallback LLM local echouera.
-- Certains comportements restent personnalises pour l'environnement de l'auteur.
-- Le repo peut contenir a la fois le code source frontend et les assets buildes de `frontend/dist/`.
+- Les fichiers `.env`, `jarvis_runtime_settings.json` et `jarvis_memoire.json` restent locaux pour conserver les cles API, reglages et souvenirs de chaque installation.
 
 ## Auteur
 
