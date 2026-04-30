@@ -33,6 +33,7 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - Mini-player YouTube integre dans l'interface
 - Recherche musicale via YouTube Data API si `YOUTUBE_API_KEY` est configuree, avec fallback automatique sur la recherche actuelle
 - Service systemd dedie au mode VM/headless
+- Compatibilite web app Apple/iOS avec manifest, icones et interface mobile adaptee
 
 ## Architecture du projet
 
@@ -186,6 +187,17 @@ Important :
 Cela permet a l'interface de continuer a recevoir les reponses meme quand seul le port HTTP est expose publiquement.
 
 
+
+## Web app mobile Apple/iOS
+
+L'interface web peut etre ajoutee a l'ecran d'accueil d'un iPhone depuis Safari avec `Partager` puis `Sur l'ecran d'accueil`.
+
+La version mobile inclut :
+- manifest PWA et icones Apple/Android ;
+- affichage plein ecran `standalone` ;
+- prise en charge des safe areas iPhone ;
+- boutons tactiles, panneau micro et dashboard adaptes aux petits ecrans ;
+- panneaux web et YouTube ajustes en feuilles mobiles.
 
 ## Resultats web visuels
 

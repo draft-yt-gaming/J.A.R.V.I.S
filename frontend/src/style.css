@@ -1141,3 +1141,285 @@ body.dashboard-open {
     flex: 1 1 100%;
   }
 }
+
+@supports (height: 100dvh) {
+  html,
+  body {
+    min-height: 100dvh;
+  }
+
+  #orb-canvas {
+    height: 100dvh;
+  }
+}
+
+@media (display-mode: standalone) {
+  body {
+    background: #050508;
+  }
+}
+
+@media (max-width: 720px) {
+  html,
+  body {
+    position: fixed;
+    inset: 0;
+    min-height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  #orb-canvas {
+    height: 100dvh;
+  }
+
+  #connection-badge {
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    right: 12px;
+    max-width: 132px;
+    height: 38px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(5, 9, 15, 0.72);
+  }
+
+  #connection-label {
+    max-width: 86px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #mute-button,
+  #dashboard-button {
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    width: 44px;
+    height: 44px;
+    background: rgba(5, 9, 15, 0.7);
+  }
+
+  #mute-button {
+    left: 12px;
+  }
+
+  #dashboard-button {
+    left: 64px;
+  }
+
+  #assistant-label {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    font-size: 9px;
+    letter-spacing: 4px;
+  }
+
+  #mic-button {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 44px);
+    width: 78px;
+    height: 78px;
+    background: rgba(5, 9, 15, 0.72);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+  }
+
+  #status-text {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 126px);
+    font-size: 12px;
+    letter-spacing: 1.8px;
+  }
+
+  #conversation-panel {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 148px);
+    width: calc(100vw - 24px);
+    max-height: 34dvh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 10px;
+  }
+
+  .speech-bubble {
+    min-height: 0;
+    padding: 12px 14px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.45;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.26);
+  }
+
+  .user-bubble,
+  .jarvis-bubble {
+    max-width: 96%;
+  }
+
+  #web-dock {
+    top: calc(env(safe-area-inset-top, 0px) + 66px);
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-height: min(44dvh, 390px);
+    padding: 12px;
+    border-radius: 18px;
+    transform: none;
+    background: rgba(7, 12, 20, 0.88);
+  }
+
+  #web-dock.is-hidden {
+    transform: translateY(-14px);
+  }
+
+  .web-dock-title {
+    font-size: 13px;
+  }
+
+  .web-image-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .web-image-strip img,
+  .web-empty-media {
+    border-radius: 10px;
+  }
+
+  .web-result-list {
+    max-height: 20dvh;
+  }
+
+  .web-result-card {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  #music-dock {
+    top: auto;
+    right: 10px;
+    left: 10px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 138px);
+    width: auto;
+    max-height: 48dvh;
+    padding: 12px;
+    border-radius: 18px;
+    transform: none;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    background: rgba(7, 12, 20, 0.9);
+  }
+
+  #music-dock.is-hidden {
+    transform: translateY(16px);
+  }
+
+  .music-dock-search {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .music-dock-search input,
+  .music-dock-search button,
+  .music-dock-controls button {
+    min-height: 46px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+
+  .music-dock-player {
+    min-height: 160px;
+    border-radius: 14px;
+  }
+
+  .music-dock-controls {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #error-text {
+    top: calc(env(safe-area-inset-top, 0px) + 62px);
+    width: calc(100vw - 24px);
+    text-align: center;
+    white-space: normal;
+  }
+
+  #dashboard-panel {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  #dashboard-card {
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    padding: calc(env(safe-area-inset-top, 0px) + 18px) 14px calc(env(safe-area-inset-bottom, 0px) + 14px);
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #dashboard-head {
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  #dashboard-title {
+    font-size: 26px;
+  }
+
+  #dashboard-subtitle {
+    display: none;
+  }
+
+  #dashboard-close {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    flex: 0 0 auto;
+  }
+
+  #dashboard-meta,
+  #dashboard-summary,
+  .dashboard-section-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-section,
+  .dashboard-debug-panel,
+  .dashboard-summary-card,
+  .dashboard-meta-card,
+  #dashboard-auth-status {
+    border-radius: 16px;
+  }
+
+  #dashboard-actions {
+    bottom: calc(env(safe-area-inset-bottom, 0px) * -1);
+    margin-inline: -14px;
+    padding: 14px 14px calc(env(safe-area-inset-bottom, 0px) + 14px);
+    justify-content: stretch;
+  }
+
+  #dashboard-actions button {
+    flex: 1 1 100%;
+    min-height: 48px;
+  }
+}
+
+@media (max-width: 390px) {
+  #connection-label {
+    display: none;
+  }
+
+  #connection-badge {
+    width: 38px;
+    justify-content: center;
+  }
+
+  #music-dock,
+  #web-dock {
+    right: 8px;
+    left: 8px;
+  }
+
+  .music-dock-controls button {
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+}
