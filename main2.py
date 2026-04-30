@@ -1414,6 +1414,63 @@ async def spotify_rechercher(recherche):
     
     return f"C'est fait Tom, je lance la lecture de '{recherche}' sur Spotify."
 
+DEFAULT_YOUTUBE_MUSIC_QUERY = "playlist musique populaire france"
+GENERIC_YOUTUBE_MUSIC_QUERIES = {
+    "", "musique", "une musique", "de la musique", "la musique", "chanson", "une chanson",
+    "clip", "video", "vidéo", "un clip", "une video", "une vidéo"
+}
+
+
+def nettoyer_recherche_youtube_depuis_commande(texte):
+    recherche = str(texte or "").lower().strip()
+    recherche = recherche.replace("’", "'").replace("`", "'")
+    recherche = re.sub(r"\b(qu)\s+'\s*", r"\1'", recherche)
+
+    replacements = [
+        (r"\best[ -]?ce que tu peux\b", " "),
+        (r"\bpeux[ -]?tu\b", " "),
+        (r"\bpourrais[ -]?tu\b", " "),
+        (r"\btu peux\b", " "),
+        (r"\bjarvis\b", " "),
+        (r"\bsur youtube\b", " "),
+        (r"\byoutube\b", " "),
+        (r"\b(mets|met|mettre|lance|lancer|joue|jouer|ouvre|ouvrir|cherche|chercher|recherche)\b", " "),
+        (r"\b(la|le|les|un|une|du|de la|des)\s+(musique|chanson|video|vidéo|clip|titre)\b", " "),
+        (r"\b(musique|chanson|video|vidéo|clip)\b", " "),
+    ]
+    for pattern, repl in replacements:
+        recherche = re.sub(pattern, repl, recherche)
+
+    recherche = re.sub(r"\s+", " ", recherche).strip(" ,.!?;:")
+    recherche = re.sub(r"^(du|de l'|de|des)\s+", "", recherche).strip()
+    corrections = {
+        "qu'on mne": "qu'on mene",
+        "qu on mne": "qu'on mene",
+        "quon mne": "qu'on mene",
+        "qu'on mène": "qu'on mene",
+    }
+    for bad, good in corrections.items():
+        recherche = recherche.replace(bad, good)
+
+    if recherche in GENERIC_YOUTUBE_MUSIC_QUERIES:
+        return DEFAULT_YOUTUBE_MUSIC_QUERY
+    return recherche
+
+
+def youtube_music_action_from_text(texte):
+    t_cmd = str(texte or "").lower().replace("’", "'").strip()
+    if not any(k in t_cmd for k in ["youtube", "musique", "chanson", "clip"]):
+        return None
+    if any(k in t_cmd for k in ["pause youtube", "stop youtube", "reprends youtube", "arrete youtube", "arrête youtube"]):
+        return None
+    if not any(k in t_cmd for k in ["mets", "met", "lance", "joue", "cherche", "recherche", "ouvre", "mettre", "lancer", "jouer"]):
+        return None
+
+    recherche = nettoyer_recherche_youtube_depuis_commande(t_cmd)
+    if not recherche:
+        recherche = DEFAULT_YOUTUBE_MUSIC_QUERY
+    return json.dumps({"action": "music_search", "query": recherche}, ensure_ascii=False)
+
 def youtube_trouver_video_id(recherche):
     try:
         response = requests.get(
@@ -3679,10 +3736,7 @@ def executer_action_pc(commande):
         return "C'est parti Tom, je mets votre playlist en plein écran."
 
     if "youtube" in cmd:
-        recherche = cmd
-        for mot in ["mets", "joue", "lance", "la video", "sur youtube", "youtube", "jarvis"]:
-            recherche = recherche.replace(mot, "")
-        recherche = recherche.strip()
+        recherche = nettoyer_recherche_youtube_depuis_commande(cmd)
         if recherche:
             url = chercher_youtube(recherche)
             if url:
@@ -4793,24 +4847,9 @@ async def resoudre_commandes_locales(texte):
         if any(k in t for k in ["reprends la musique", "remets la musique", "reprends youtube", "lecture"]):
             return '{"action": "music_play"}'
 
-        prefixes_youtube = ["joue du ", "joue de la ", "mets du ", "mets de la ", "joue ", "mets ", "recherche "]
-        for prefix in prefixes_youtube:
-            if t.startswith(prefix):
-                recherche = t.replace(prefix, "").replace(" sur youtube", "").strip()
-                if len(recherche) > 1 and "spotify" not in recherche:
-                    return json.dumps({"action": "music_search", "query": recherche}, ensure_ascii=False)
-
-        if "youtube" in t and not any(k in t for k in ["spotify", "pause youtube", "stop youtube", "reprends youtube"]):
-            recherche = t
-            for mot in [
-                "peux-tu", "peux tu", "pourrais-tu", "pourrais tu", "tu peux", "est-ce que tu peux",
-                "lancer", "lance", "jouer", "joue", "mettre", "mets", "ouvrir", "ouvre",
-                "sur youtube", "youtube", "la musique", "la chanson", "la video", "le clip", "video", "clip"
-            ]:
-                recherche = recherche.replace(mot, " ")
-            recherche = re.sub(r"\s+", " ", recherche).strip(" ,.!?;:")
-            if len(recherche) > 1:
-                return json.dumps({"action": "music_search", "query": recherche}, ensure_ascii=False)
+        music_action = youtube_music_action_from_text(t)
+        if music_action and "spotify" not in t:
+            return music_action
 
     # --- SPOTIFY (Priorité 3) ---
     if any(k in t for k in ["ouvre spotify", "lance spotify", "démarre spotify"]):
