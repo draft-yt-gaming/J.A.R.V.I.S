@@ -8,6 +8,7 @@ googleapis-common-protos
 google-auth
 google-auth-httplib2
 google-auth-oauthlib
+PyNaCl
 grpcio
 grpcio-status
 proto-plus

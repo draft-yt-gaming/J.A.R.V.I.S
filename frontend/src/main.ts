@@ -104,6 +104,8 @@ const DASHBOARD_FIELDS: DashboardField[] = [
   { key: "DISCORD_CLIENT_ID", label: "Discord Client ID", type: "text", section: "Discord" },
   { key: "DISCORD_CLIENT_SECRET", label: "Discord Client Secret", type: "password", section: "Discord" },
   { key: "DISCORD_REDIRECT_URI", label: "Discord Redirect URI", type: "url", section: "Discord", placeholder: "http://IP:8080/auth/discord/callback" },
+  { key: "DISCORD_PUBLIC_KEY", label: "Discord Public Key", type: "password", section: "Discord" },
+  { key: "DISCORD_BOT_TOKEN", label: "Discord Bot Token", type: "password", section: "Discord" },
 ];
 
 const WS_SCHEME = window.location.protocol === "https:" ? "wss" : "ws";

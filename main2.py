@@ -55,6 +55,13 @@ try:
 except ImportError:
     psutil = None
 
+try:
+    from nacl.signing import VerifyKey
+    from nacl.exceptions import BadSignatureError
+except ImportError:
+    VerifyKey = None
+    BadSignatureError = Exception
+
 # Linux — ctypes/windll non disponible
 import signal as _signal
 user32 = None
@@ -182,6 +189,8 @@ DEFAULT_SETTINGS = {
     "DISCORD_CLIENT_ID": os.getenv("DISCORD_CLIENT_ID", ""),
     "DISCORD_CLIENT_SECRET": os.getenv("DISCORD_CLIENT_SECRET", ""),
     "DISCORD_REDIRECT_URI": os.getenv("DISCORD_REDIRECT_URI", ""),
+    "DISCORD_PUBLIC_KEY": os.getenv("DISCORD_PUBLIC_KEY", ""),
+    "DISCORD_BOT_TOKEN": os.getenv("DISCORD_BOT_TOKEN", ""),
     "JARVIS_SESSION_SECRET": os.getenv("JARVIS_SESSION_SECRET", ""),
     "EXTENSION_ACCESS_TOKEN": os.getenv("EXTENSION_ACCESS_TOKEN", ""),
 }
@@ -199,6 +208,8 @@ SENSITIVE_SETTINGS = {
     "EMBY_API_KEY",
     "PROXMOX_TOKEN_SECRET",
     "DISCORD_CLIENT_SECRET",
+    "DISCORD_PUBLIC_KEY",
+    "DISCORD_BOT_TOKEN",
     "JARVIS_SESSION_SECRET",
     "EXTENSION_ACCESS_TOKEN",
 }
@@ -263,6 +274,8 @@ DISCORD_OWNER_ID = ""
 DISCORD_CLIENT_ID = ""
 DISCORD_CLIENT_SECRET = ""
 DISCORD_REDIRECT_URI = ""
+DISCORD_PUBLIC_KEY = ""
+DISCORD_BOT_TOKEN = ""
 ASSISTANT_NAME = "J.A.R.V.I.S"
 JARVIS_SESSION_SECRET = ""
 EXTENSION_ACCESS_TOKEN = ""
@@ -292,7 +305,7 @@ def refresh_runtime_config():
     global OLLAMA_ENABLED, OLLAMA_PREFER_LOCAL, OLLAMA_URL, OLLAMA_MODELS
     global EMBY_URL, EMBY_API_KEY, EMBY_USER_ID, EMBY_USERNAME
     global PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_VERIFY_SSL
-    global DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI
+    global DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI, DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN
     global JARVIS_SESSION_SECRET, EXTENSION_ACCESS_TOKEN
     global GEMINI_CONFIGURED, BLAGUES_CONFIGURED, YOUTUBE_CONFIGURED, XAI_CONFIGURED, HA_CONFIGURED
     global SERPAPI_CONFIGURED, GROQ_CONFIGURED, NASA_CONFIGURED, OLLAMA_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
@@ -327,6 +340,8 @@ def refresh_runtime_config():
     DISCORD_CLIENT_ID = str(settings.get("DISCORD_CLIENT_ID", "")).strip()
     DISCORD_CLIENT_SECRET = str(settings.get("DISCORD_CLIENT_SECRET", "")).strip()
     DISCORD_REDIRECT_URI = str(settings.get("DISCORD_REDIRECT_URI", "")).strip()
+    DISCORD_PUBLIC_KEY = str(settings.get("DISCORD_PUBLIC_KEY", "")).strip()
+    DISCORD_BOT_TOKEN = str(settings.get("DISCORD_BOT_TOKEN", "")).strip()
     JARVIS_SESSION_SECRET = str(settings.get("JARVIS_SESSION_SECRET", "")).strip()
     EXTENSION_ACCESS_TOKEN = str(settings.get("EXTENSION_ACCESS_TOKEN", "")).strip()
 
@@ -396,6 +411,7 @@ def get_service_config_flags():
         "emby": EMBY_CONFIGURED,
         "proxmox": PROXMOX_CONFIGURED,
         "discord": DISCORD_CONFIGURED,
+        "discord_interactions": env_value_is_configured(DISCORD_CLIENT_ID) and env_value_is_configured(DISCORD_PUBLIC_KEY),
     }
 
 
@@ -635,6 +651,8 @@ def get_private_runtime_settings():
         "DISCORD_CLIENT_ID": DISCORD_CLIENT_ID,
         "DISCORD_CLIENT_SECRET": DISCORD_CLIENT_SECRET,
         "DISCORD_REDIRECT_URI": DISCORD_REDIRECT_URI,
+        "DISCORD_PUBLIC_KEY": DISCORD_PUBLIC_KEY,
+        "DISCORD_BOT_TOKEN": DISCORD_BOT_TOKEN,
         "JARVIS_SESSION_SECRET": JARVIS_SESSION_SECRET,
         "EXTENSION_ACCESS_TOKEN": EXTENSION_ACCESS_TOKEN,
     }
@@ -708,6 +726,115 @@ def extension_request_authorized():
     configured_token = str(EXTENSION_ACCESS_TOKEN or "").strip()
     provided_token = str(flask_request.headers.get("X-Jarvis-Extension-Token", "")).strip()
     return bool(configured_token and provided_token and secrets.compare_digest(configured_token, provided_token))
+
+
+def verify_discord_interaction_signature(raw_body):
+    if VerifyKey is None:
+        print("[DISCORD] PyNaCl manquant : pip install PyNaCl")
+        return False
+    public_key = str(DISCORD_PUBLIC_KEY or "").strip()
+    signature = str(flask_request.headers.get("X-Signature-Ed25519", "")).strip()
+    timestamp = str(flask_request.headers.get("X-Signature-Timestamp", "")).strip()
+    if not public_key or not signature or not timestamp:
+        return False
+    try:
+        verify_key = VerifyKey(bytes.fromhex(public_key))
+        verify_key.verify(timestamp.encode("utf-8") + raw_body, bytes.fromhex(signature))
+        return True
+    except (BadSignatureError, ValueError, TypeError) as e:
+        print(f"[DISCORD] Signature interaction invalide : {e}")
+        return False
+
+
+def _discord_user_display_name(user):
+    if not isinstance(user, dict):
+        return "Utilisateur inconnu"
+    return (
+        str(user.get("global_name") or "").strip()
+        or str(user.get("username") or "").strip()
+        or str(user.get("id") or "Utilisateur inconnu").strip()
+    )
+
+
+def extract_discord_target_message(payload):
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    resolved = data.get("resolved", {}) if isinstance(data, dict) else {}
+    messages = resolved.get("messages", {}) if isinstance(resolved, dict) else {}
+    target_id = str(data.get("target_id") or "").strip()
+    message = messages.get(target_id) or (next(iter(messages.values()), {}) if isinstance(messages, dict) else {})
+    if not isinstance(message, dict):
+        message = {}
+
+    message_id = str(message.get("id") or target_id or "").strip()
+    channel_id = str(message.get("channel_id") or payload.get("channel_id") or "").strip()
+    guild_id = str(payload.get("guild_id") or "").strip()
+    author = _discord_user_display_name(message.get("author", {}))
+    content = str(message.get("content") or "").strip()
+
+    attachments = message.get("attachments") or []
+    if isinstance(attachments, list) and attachments:
+        names = []
+        for attachment in attachments[:5]:
+            if isinstance(attachment, dict):
+                name = str(attachment.get("filename") or attachment.get("url") or "piece jointe").strip()
+                if name:
+                    names.append(name)
+        if names:
+            content = (content + "\n\nPieces jointes: " + ", ".join(names)).strip()
+
+    jump_url = ""
+    if channel_id and message_id:
+        jump_url = f"https://discord.com/channels/{guild_id or '@me'}/{channel_id}/{message_id}"
+
+    return {
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "guild_id": guild_id,
+        "author": author,
+        "content": content,
+        "jump_url": jump_url,
+    }
+
+
+def post_discord_followup(application_id, interaction_token, content):
+    app_id = str(application_id or DISCORD_CLIENT_ID or "").strip()
+    token = str(interaction_token or "").strip()
+    if not app_id or not token:
+        print("[DISCORD] Followup impossible : application_id ou token manquant")
+        return False
+    safe_content = str(content or "").strip() or "Je n'ai pas pu generer le resume de ce message."
+    if len(safe_content) > 1900:
+        safe_content = safe_content[:1890].rstrip() + "..."
+    try:
+        response = requests.post(
+            f"https://discord.com/api/v10/webhooks/{app_id}/{token}",
+            json={
+                "content": safe_content,
+                "flags": 64,
+                "allowed_mentions": {"parse": []},
+            },
+            timeout=15,
+        )
+        if 200 <= response.status_code < 300:
+            return True
+        print(f"[DISCORD] Echec followup {response.status_code}: {response.text[:500]}")
+    except Exception as e:
+        print(f"[DISCORD] Erreur followup : {e}")
+    return False
+
+
+def process_discord_message_summary(payload):
+    try:
+        target = extract_discord_target_message(payload)
+        summary = asyncio.run(resumer_message_discord(
+            author=target["author"],
+            content=target["content"],
+            jump_url=target["jump_url"],
+        ))
+    except Exception as e:
+        print(f"[DISCORD] Erreur resume message : {e}")
+        summary = "Je n'ai pas pu resumer ce message pour le moment."
+    post_discord_followup(payload.get("application_id"), payload.get("token"), summary)
 
 
 def build_command_context(auth_user=None, client_id=""):
@@ -4818,6 +4945,75 @@ async def resumer_page_extension(page_title, page_url, page_text):
     return "Je n'ai pas pu generer le resume pour le moment, mais le texte de la page a bien ete transmis par l'extension."
 
 
+async def resumer_message_discord(author, content, jump_url=""):
+    content = str(content or "").strip()
+    if not content:
+        return "Je n'ai pas assez de texte lisible dans ce message Discord pour le resumer."
+
+    content = content[:12000]
+    system_instruction = (
+        "Tu es J.A.R.V.I.S dans Discord. "
+        "Tu resumes uniquement le message Discord fourni. "
+        "Ne dis pas que tu ne peux pas acceder a une URL externe, ne demande pas de copier-coller le texte, "
+        "et n'invente pas le contexte qui n'est pas dans le message."
+    )
+    prompt = (
+        "Resume clairement en francais ce message Discord.\n"
+        "Format attendu:\n"
+        "Resume: 1 a 3 phrases.\n"
+        "Points importants: 4 puces maximum si utile.\n"
+        "Action a faire: uniquement si le message en contient une.\n\n"
+        f"Auteur: {author or 'Utilisateur inconnu'}\n"
+        f"Lien du message, informatif seulement: {jump_url or 'indisponible'}\n"
+        "MESSAGE DISCORD:\n"
+        f"{content}"
+    )
+
+    if client:
+        last_err = None
+        contents = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+        for model_name in MODELS_LIST:
+            try:
+                response = await gemini_generate_with_failover(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.2,
+                    ),
+                    timeout=18.0,
+                )
+                if response.text:
+                    return response.text.strip()
+            except Exception as e:
+                print(f"[DISCORD] Echec resume Gemini {model_name} : {e}")
+                last_err = e
+        print(f"[DISCORD] Gemini indisponible pour resume : {last_err}")
+
+    fallback_prompt = f"{system_instruction}\n\n{prompt}"
+    if groq_client:
+        try:
+            rep_groq = await demander_groq(fallback_prompt)
+            if rep_groq:
+                return rep_groq.strip()
+        except Exception as e:
+            print(f"[DISCORD] Echec resume Groq : {e}")
+
+    if grok_client:
+        try:
+            rep_grok = await demander_grok(fallback_prompt)
+            if rep_grok:
+                return rep_grok.strip()
+        except Exception as e:
+            print(f"[DISCORD] Echec resume Grok : {e}")
+
+    rep_ollama = await demander_ollama(fallback_prompt)
+    if rep_ollama:
+        return rep_ollama.strip()
+
+    return "Je n'ai pas pu generer le resume Discord pour le moment."
+
+
 async def demander_ia(texte):
 
     global is_thinking, GEMINI_QUOTA_BLOCKED_UNTIL
@@ -6436,6 +6632,39 @@ def start_http_interface_server():
             "config_flags": get_service_config_flags(),
             "service_health": get_service_health_flags(),
             "ws_auth_token": issue_ws_auth_token(user) if owner_authenticated else "",
+        })
+
+    @app.post("/api/discord/interactions")
+    def api_discord_interactions():
+        raw_body = flask_request.get_data(cache=False)
+        if not verify_discord_interaction_signature(raw_body):
+            return jsonify({"error": "invalid_signature"}), 401
+
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except Exception:
+            return jsonify({"error": "invalid_json"}), 400
+
+        interaction_type = payload.get("type")
+        if interaction_type == 1:
+            return jsonify({"type": 1})
+
+        data = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
+        command_type = data.get("type")
+        if interaction_type == 2 and command_type == 3:
+            threading.Thread(target=process_discord_message_summary, args=(payload,), daemon=True).start()
+            return jsonify({
+                "type": 5,
+                "data": {"flags": 64},
+            })
+
+        return jsonify({
+            "type": 4,
+            "data": {
+                "content": "Cette interaction Discord n'est pas encore prise en charge par JARVIS.",
+                "flags": 64,
+                "allowed_mentions": {"parse": []},
+            },
         })
 
     @app.post("/api/command")

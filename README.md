@@ -176,6 +176,8 @@ DISCORD_OWNER_ID=VOTRE_ID_DISCORD
 DISCORD_CLIENT_ID=VOTRE_CLIENT_ID
 DISCORD_CLIENT_SECRET=VOTRE_CLIENT_SECRET
 DISCORD_REDIRECT_URI=http://IP_OU_DOMAINE:8080/auth/discord/callback
+DISCORD_PUBLIC_KEY=PUBLIC_KEY_DE_L_APPLICATION
+DISCORD_BOT_TOKEN=TOKEN_DU_BOT
 
 JARVIS_SESSION_SECRET=UN_SECRET_LONG_ET_ALEATOIRE
 EXTENSION_ACCESS_TOKEN=UN_TOKEN_POUR_EXTENSION_PUBLIQUE
@@ -378,6 +380,7 @@ Jarvis separe les APIs specialisees des fournisseurs IA. Les APIs publiques ci-d
 | Proxmox | Gestion VM/LXC, statut, actions | Oui | `PROXMOX_URL`, `PROXMOX_TOKEN_ID`, `PROXMOX_TOKEN_SECRET` |
 | Emby | Bibliotheque media personnelle | Oui | `EMBY_URL`, `EMBY_API_KEY`, puis `EMBY_USER_ID` ou `EMBY_USERNAME` |
 | Discord OAuth | Protection du dashboard administrateur | Oui | `DISCORD_OWNER_ID`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI` |
+| Discord Applications | Clic droit sur un message Discord puis resume par Jarvis | Oui | `DISCORD_CLIENT_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN` |
 | Blagues API | Blagues externes si configure | Oui | `BLAGUES_API_TOKEN` |
 
 Exemples APIs publiques : `meteo demain a Paris`, `jours feries en France`, `wikipedia Nikola Tesla`, `nutriscore coca cola`, `isbn 9782070368228`, `image nasa du jour`, `coordonnees de la tour eiffel`.
@@ -414,6 +417,29 @@ Depuis l'interface web, Jarvis peut recevoir une commande de deux facons :
 - prononcer le nom configure de l'assistant pour activer le micro, puis dicter la commande comme apres un clic.
 
 Le nom de reveil utilise la valeur `assistant_name` reglable dans le dashboard. Pendant que Jarvis parle, l'ecoute est suspendue puis relancee automatiquement pour eviter que l'assistant se reponde a lui-meme.
+
+## Discord : resumer un message
+
+Jarvis peut etre relie a une application Discord pour resumer un message depuis le menu contextuel : clic droit sur un message, `Applications`, puis `Resumer avec JARVIS`.
+
+Configuration :
+
+```bash
+python3 scripts/register_discord_commands.py
+```
+
+A renseigner dans le dashboard ou dans `.env` :
+- `DISCORD_CLIENT_ID` : Application ID Discord
+- `DISCORD_PUBLIC_KEY` : Public Key de l'application, obligatoire pour verifier les interactions
+- `DISCORD_BOT_TOKEN` : token du bot, utilise seulement pour enregistrer la commande
+
+Dans le Discord Developer Portal, configure l'Interactions Endpoint URL sur ton domaine public :
+
+```text
+https://jarvis.drafthome.fr/api/discord/interactions
+```
+
+La commande est globale et peut etre installee sur un serveur ou comme application utilisateur Discord. Le resume est renvoye en message ephemere, visible seulement par la personne qui a clique.
 
 ## Dashboard et securite
 
