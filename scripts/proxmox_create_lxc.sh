@@ -80,6 +80,41 @@ pick_default_template_storage() {
   pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && $1 != "" {print $1; exit}'
 }
 
+list_proxmox_bridges() {
+  ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^vmbr[[:alnum:]_.-]+$/ {print $2}' | sort -V
+}
+
+ask_bridge() {
+  local bridges=() choice i
+  mapfile -t bridges < <(list_proxmox_bridges)
+  if [ "${#bridges[@]}" -eq 0 ]; then
+    warn "Aucun bridge vmbr detecte automatiquement."
+    ask 'Bridge reseau Proxmox' 'vmbr0'
+    return 0
+  fi
+
+  echo "Bridges reseau detectes :" >&2
+  for i in "${!bridges[@]}"; do
+    printf '  %s = %s\n' "$((i + 1))" "${bridges[$i]}" >&2
+  done
+
+  while true; do
+    read -r -p "Choix du bridge reseau (numero ou nom) [1] : " choice
+    choice="${choice:-1}"
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#bridges[@]}" ]; then
+      printf '%s' "${bridges[$((choice - 1))]}"
+      return 0
+    fi
+    for bridge in "${bridges[@]}"; do
+      if [ "$choice" = "$bridge" ]; then
+        printf '%s' "$choice"
+        return 0
+      fi
+    done
+    warn "Choix invalide. Mets un numero de la liste ou le nom exact du bridge."
+  done
+}
+
 pick_debian_template() {
   pveam update >/dev/null
   pveam available --section system | awk '/debian-12-standard_.*amd64.*\.tar\.(zst|gz)/ {print $2}' | sort -V | tail -1
@@ -215,7 +250,7 @@ main() {
   CORES="$(ask 'Nombre de CPU cores' '2')"
   MEMORY_MB="$(ask 'RAM en Mo (4096 conseille)' '4096')"
   SWAP_MB="$(ask 'Swap en Mo' '1024')"
-  BRIDGE="$(ask 'Bridge reseau Proxmox' 'vmbr0')"
+  BRIDGE="$(ask_bridge)"
   NET_MODE="$(ask 'IP du CT: dhcp ou statique CIDR (ex: 192.168.1.50/24)' 'dhcp')"
   GATEWAY=""
   if [ "$NET_MODE" != "dhcp" ]; then
