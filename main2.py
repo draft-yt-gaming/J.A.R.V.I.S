@@ -87,6 +87,9 @@ SERVICE_HEALTH_TTL = 30.0
 HTTP_CLIENT_EVENTS = {}
 HTTP_CLIENT_EVENTS_LOCK = threading.Lock()
 COMMAND_HTTP_CLIENT_ID = ContextVar("jarvis_http_client_id", default="")
+DISCORD_SUMMARY_CACHE = {}
+DISCORD_SUMMARY_CACHE_LOCK = threading.Lock()
+DISCORD_SUMMARY_CACHE_TTL = 15 * 60
 
 
 class DebugTeeStream:
@@ -796,23 +799,66 @@ def extract_discord_target_message(payload):
     }
 
 
-def post_discord_followup(application_id, interaction_token, content):
+def trim_discord_content(content, limit=1900):
+    safe_content = str(content or "").strip()
+    if len(safe_content) > limit:
+        return safe_content[: max(0, limit - 3)].rstrip() + "..."
+    return safe_content
+
+
+def cache_discord_summary(summary):
+    summary_id = secrets.token_urlsafe(12)
+    now = time.time()
+    with DISCORD_SUMMARY_CACHE_LOCK:
+        expired = [key for key, value in DISCORD_SUMMARY_CACHE.items() if now - value.get("created_at", 0) > DISCORD_SUMMARY_CACHE_TTL]
+        for key in expired:
+            DISCORD_SUMMARY_CACHE.pop(key, None)
+        DISCORD_SUMMARY_CACHE[summary_id] = {"summary": str(summary or ""), "created_at": now}
+    return summary_id
+
+
+def pop_cached_discord_summary(summary_id):
+    now = time.time()
+    with DISCORD_SUMMARY_CACHE_LOCK:
+        cached = DISCORD_SUMMARY_CACHE.get(str(summary_id or ""))
+        if not cached:
+            return ""
+        if now - cached.get("created_at", 0) > DISCORD_SUMMARY_CACHE_TTL:
+            DISCORD_SUMMARY_CACHE.pop(str(summary_id or ""), None)
+            return ""
+        return str(cached.get("summary") or "").strip()
+
+
+def build_discord_show_button(summary_id):
+    return [{
+        "type": 1,
+        "components": [{
+            "type": 2,
+            "style": 1,
+            "label": "Montrer",
+            "custom_id": f"jarvis_show_summary:{summary_id}",
+        }],
+    }]
+
+
+def post_discord_followup(application_id, interaction_token, content, summary_id=""):
     app_id = str(application_id or DISCORD_CLIENT_ID or "").strip()
     token = str(interaction_token or "").strip()
     if not app_id or not token:
         print("[DISCORD] Followup impossible : application_id ou token manquant")
         return False
-    safe_content = str(content or "").strip() or "Je n'ai pas pu generer le resume de ce message."
-    if len(safe_content) > 1900:
-        safe_content = safe_content[:1890].rstrip() + "..."
+    safe_content = trim_discord_content(content or "Je n'ai pas pu generer le resume de ce message.")
+    payload = {
+        "content": safe_content,
+        "flags": 64,
+        "allowed_mentions": {"parse": []},
+    }
+    if summary_id:
+        payload["components"] = build_discord_show_button(summary_id)
     try:
         response = requests.post(
             f"https://discord.com/api/v10/webhooks/{app_id}/{token}",
-            json={
-                "content": safe_content,
-                "flags": 64,
-                "allowed_mentions": {"parse": []},
-            },
+            json=payload,
             timeout=15,
         )
         if 200 <= response.status_code < 300:
@@ -821,6 +867,26 @@ def post_discord_followup(application_id, interaction_token, content):
     except Exception as e:
         print(f"[DISCORD] Erreur followup : {e}")
     return False
+
+
+def build_public_discord_summary_response(summary_id):
+    summary = pop_cached_discord_summary(summary_id)
+    if not summary:
+        return {
+            "type": 4,
+            "data": {
+                "content": "Ce resume n'est plus disponible. Redemande un resume du message puis appuie sur Montrer.",
+                "flags": 64,
+                "allowed_mentions": {"parse": []},
+            },
+        }
+    return {
+        "type": 4,
+        "data": {
+            "content": trim_discord_content(f"Resume partage par J.A.R.V.I.S :\n\n{summary}"),
+            "allowed_mentions": {"parse": []},
+        },
+    }
 
 
 def process_discord_message_summary(payload):
@@ -834,7 +900,8 @@ def process_discord_message_summary(payload):
     except Exception as e:
         print(f"[DISCORD] Erreur resume message : {e}")
         summary = "Je n'ai pas pu resumer ce message pour le moment."
-    post_discord_followup(payload.get("application_id"), payload.get("token"), summary)
+    summary_id = cache_discord_summary(summary)
+    post_discord_followup(payload.get("application_id"), payload.get("token"), summary, summary_id=summary_id)
 
 
 def build_command_context(auth_user=None, client_id=""):
@@ -6657,6 +6724,11 @@ def start_http_interface_server():
                 "type": 5,
                 "data": {"flags": 64},
             })
+
+        if interaction_type == 3:
+            custom_id = str(data.get("custom_id") or "")
+            if custom_id.startswith("jarvis_show_summary:"):
+                return jsonify(build_public_discord_summary_response(custom_id.split(":", 1)[1]))
 
         return jsonify({
             "type": 4,

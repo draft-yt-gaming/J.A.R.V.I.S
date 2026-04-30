@@ -439,7 +439,7 @@ Dans le Discord Developer Portal, configure l'Interactions Endpoint URL sur ton 
 https://jarvis.drafthome.fr/api/discord/interactions
 ```
 
-La commande est globale et peut etre installee sur un serveur ou comme application utilisateur Discord. Le resume est renvoye en message ephemere, visible seulement par la personne qui a clique.
+La commande est globale et peut etre installee sur un serveur ou comme application utilisateur Discord. Le resume est d'abord renvoye en message ephemere, visible seulement par la personne qui a clique. Le bouton `Montrer` sous le resume permet ensuite de publier ce resume dans le salon pour tout le monde.
 
 ## Dashboard et securite
 
