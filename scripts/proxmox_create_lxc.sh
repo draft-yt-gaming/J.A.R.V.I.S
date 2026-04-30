@@ -242,14 +242,47 @@ main() {
   [ -n "$default_storage" ] || default_storage="local-lvm"
   [ -n "$default_tmpl_storage" ] || default_tmpl_storage="local"
 
-  CTID="$(ask 'ID du container Proxmox' "$default_ctid")"
+  ADVANCED_MODE=0
+  if ask_yes_no 'Activer le mode avance ?' 'n'; then
+    ADVANCED_MODE=1
+  fi
+
+  CTID="$default_ctid"
+  STORAGE="$default_storage"
+  TEMPLATE_STORAGE="$default_tmpl_storage"
+  DISK_GB="16"
+  CORES="2"
+  MEMORY_MB="4096"
+  SWAP_MB="1024"
+  HTTP_PORT="8080"
+  HTTPS_PORT="8443"
+  WS_PORT="8765"
+  UNPRIVILEGED=1
+  ONBOOT=1
+
+  if [ "$ADVANCED_MODE" -eq 1 ]; then
+    CTID="$(ask 'ID du container Proxmox' "$default_ctid")"
+    STORAGE="$(ask 'Storage disque CT' "$default_storage")"
+    TEMPLATE_STORAGE="$(ask 'Storage des templates Proxmox' "$default_tmpl_storage")"
+    DISK_GB="$(ask 'Taille disque en Go (16 Go conseille, plus si Ollama)' '16')"
+    CORES="$(ask 'Nombre de CPU cores' '2')"
+    MEMORY_MB="$(ask 'RAM en Mo (4096 conseille)' '4096')"
+    SWAP_MB="$(ask 'Swap en Mo' '1024')"
+    HTTP_PORT="$(ask 'Port HTTP JARVIS' '8080')"
+    HTTPS_PORT="$(ask 'Port HTTPS JARVIS' '8443')"
+    WS_PORT="$(ask 'Port WebSocket JARVIS' '8765')"
+    if ask_yes_no 'Creer un CT privilegie ? Non recommande pour JARVIS web' 'n'; then
+      UNPRIVILEGED=0
+    fi
+    if ! ask_yes_no 'Demarrer automatiquement le CT avec Proxmox ?' 'y'; then
+      ONBOOT=0
+    fi
+  else
+    info "Mode simple : ID CT $CTID, $CORES CPU, ${MEMORY_MB} Mo RAM, ${DISK_GB} Go disque, ports $HTTP_PORT/$HTTPS_PORT/$WS_PORT."
+    info "Active le mode avance pour modifier ces valeurs."
+  fi
+
   HOSTNAME="$(ask 'Nom du container' 'jarvis')"
-  STORAGE="$(ask 'Storage disque CT' "$default_storage")"
-  TEMPLATE_STORAGE="$(ask 'Storage des templates Proxmox' "$default_tmpl_storage")"
-  DISK_GB="$(ask 'Taille disque en Go (16 Go conseille, plus si Ollama)' '16')"
-  CORES="$(ask 'Nombre de CPU cores' '2')"
-  MEMORY_MB="$(ask 'RAM en Mo (4096 conseille)' '4096')"
-  SWAP_MB="$(ask 'Swap en Mo' '1024')"
   BRIDGE="$(ask_bridge)"
   NET_MODE="$(ask 'IP du CT: dhcp ou statique CIDR (ex: 192.168.1.50/24)' 'dhcp')"
   GATEWAY=""
@@ -257,21 +290,14 @@ main() {
     GATEWAY="$(ask 'Passerelle reseau' '')"
     [ -n "$GATEWAY" ] || fail "Une passerelle est requise en IP statique."
   fi
-  HTTP_PORT="$(ask 'Port HTTP JARVIS' '8080')"
-  HTTPS_PORT="$(ask 'Port HTTPS JARVIS' '8443')"
-  WS_PORT="$(ask 'Port WebSocket JARVIS' '8765')"
   PASSWORD="$(ask_password)"
-
-  UNPRIVILEGED=1
-  if ask_yes_no 'Creer un CT privilegie ? Non recommande pour JARVIS web' 'n'; then
-    UNPRIVILEGED=0
-  fi
 
   template="$(pick_debian_template)"
   [ -n "$template" ] || fail "Aucun template Debian 12 amd64 trouve via pveam. Lance 'pveam update' puis reessaie."
 
   echo ""
-  info "Resume : CT $CTID / $HOSTNAME / ${CORES} CPU / ${MEMORY_MB} Mo RAM / ${DISK_GB} Go / reseau $NET_MODE"
+  info "Resume : CT $CTID / $HOSTNAME / ${CORES} CPU / ${MEMORY_MB} Mo RAM / ${DISK_GB} Go / bridge $BRIDGE / reseau $NET_MODE"
+  info "Ports : HTTP $HTTP_PORT / HTTPS $HTTPS_PORT / WebSocket $WS_PORT"
   info "Template : $TEMPLATE_STORAGE:vztmpl/$template"
   if ! ask_yes_no 'Creer et installer ce container maintenant ?' 'y'; then
     warn "Creation annulee."
@@ -302,7 +328,7 @@ main() {
     --password "$PASSWORD" \
     --unprivileged "$UNPRIVILEGED" \
     --features nesting=1,keyctl=1 \
-    --onboot 1 \
+    --onboot "$ONBOOT" \
     --start 1; then
     warn "La creation du CT a echoue."
     if pct status "$CTID" >/dev/null 2>&1; then

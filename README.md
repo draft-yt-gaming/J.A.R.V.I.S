@@ -261,9 +261,9 @@ Si le depot est deja clone sur l'hote Proxmox, tu peux aussi lancer :
 bash scripts/proxmox_create_lxc.sh
 ```
 
-Le script pose les questions dans le terminal : ID du CT, nom, storage, disque, CPU, RAM, bridge reseau detecte automatiquement avec choix numerote (`1 = vmbr0`, `2 = vmbr1`, etc.), IP DHCP/statique, ports JARVIS et mot de passe root du CT. Il cree ensuite un CT Debian, installe les dependances, clone le depot en HTTPS, build le frontend, cree un `.env` depuis `.env.example`, genere `JARVIS_SESSION_SECRET`, installe le service `jarvis-vm.service` et le demarre.
+Le script propose un mode simple et un mode avance. En mode simple, il demande seulement le nom du CT, le bridge reseau detecte automatiquement avec choix numerote (`1 = vmbr0`, `2 = vmbr1`, etc.), l'IP DHCP/statique et le mot de passe root. En mode avance, il demande aussi l'ID du CT, les storages, disque, CPU, RAM, swap, ports JARVIS, CT privilegie ou non, et demarrage automatique. Il cree ensuite un CT Debian, installe les dependances, clone le depot en HTTPS, build le frontend, cree un `.env` depuis `.env.example`, genere `JARVIS_SESSION_SECRET`, installe le service `jarvis-vm.service` et le demarre.
 
-Valeurs conseillees pour un CT standard :
+Valeurs utilisees par le mode simple pour un CT standard :
 - 2 CPU cores ;
 - 4096 Mo RAM ;
 - 1024 Mo swap ;
