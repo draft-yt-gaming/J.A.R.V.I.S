@@ -2,6 +2,18 @@ import { createOrb, type OrbState } from "./orb";
 import { injectVisionButton, captureFrame } from "./screen_capture";
 import "./style.css";
 
+type WebResultItem = {
+  title?: string;
+  snippet?: string;
+  link?: string;
+  source?: string;
+};
+
+type WebImageItem = {
+  src?: string;
+  alt?: string;
+};
+
 type WsMessage = {
   state?: string;
   action?: string;
@@ -12,6 +24,8 @@ type WsMessage = {
   audio_b64?: string;
   query?: string;
   video_id?: string;
+  items?: WebResultItem[];
+  images?: WebImageItem[];
 };
 
 type BrowserSpeechRecognition = {
@@ -110,6 +124,11 @@ const dashboardFlagsEl = document.getElementById("dashboard-config-flags") as HT
 const dashboardDebugPanelEl = document.getElementById("dashboard-debug-panel") as HTMLDivElement;
 const dashboardDebugToggleEl = document.getElementById("dashboard-debug-toggle") as HTMLButtonElement;
 const dashboardDebugOutputEl = document.getElementById("dashboard-debug-output") as HTMLPreElement;
+const webDockEl = document.getElementById("web-dock") as HTMLDivElement;
+const webHideButtonEl = document.getElementById("web-hide-button") as HTMLButtonElement;
+const webDockTitleEl = document.getElementById("web-dock-title") as HTMLDivElement;
+const webImageStripEl = document.getElementById("web-image-strip") as HTMLDivElement;
+const webResultListEl = document.getElementById("web-result-list") as HTMLDivElement;
 const musicDockEl = document.getElementById("music-dock") as HTMLDivElement;
 const musicHideButtonEl = document.getElementById("music-hide-button") as HTMLButtonElement;
 const musicSearchInputEl = document.getElementById("music-search-input") as HTMLInputElement;
@@ -237,6 +256,52 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+
+function setWebDockVisible(visible: boolean): void {
+  webDockEl.classList.toggle("is-hidden", !visible);
+}
+
+function safeExternalUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function renderWebResults(query: string, items: WebResultItem[] = [], images: WebImageItem[] = []): void {
+  webDockTitleEl.textContent = query || "Resultats web";
+  webImageStripEl.innerHTML = images.length
+    ? images.slice(0, 6).map((image) => {
+      const src = escapeHtml(image.src || "");
+      const alt = escapeHtml(image.alt || query || "image");
+      return src ? `<img src="${src}" alt="${alt}" loading="lazy" />` : "";
+    }).join("")
+    : `<div class="web-empty-media">Aucune image</div>`;
+
+  webResultListEl.innerHTML = items.length
+    ? items.slice(0, 6).map((item) => {
+      const title = escapeHtml(item.title || "Resultat web");
+      const snippet = escapeHtml(item.snippet || "");
+      const source = escapeHtml(item.source || "");
+      const link = safeExternalUrl(item.link || "");
+      const safeLink = escapeHtml(link);
+      const titleHtml = link
+        ? `<a href="${safeLink}" target="_blank" rel="noreferrer">${title}</a>`
+        : `<strong>${title}</strong>`;
+      return `
+        <article class="web-result-card">
+          <div class="web-result-title">${titleHtml}</div>
+          ${source ? `<div class="web-result-source">${source}</div>` : ""}
+          ${snippet ? `<p>${snippet}</p>` : ""}
+        </article>
+      `;
+    }).join("")
+    : `<div class="web-result-card"><strong>Aucun lien trouve</strong><p>Jarvis n'a pas recu de resultats cliquables pour cette recherche.</p></div>`;
+  setWebDockVisible(true);
 }
 
 function createEyeIcon(hidden: boolean): string {
@@ -583,6 +648,15 @@ async function handleServerMessage(data: WsMessage): Promise<void> {
 
   if (data.action === "jarvis_response" && typeof data.text === "string") {
     setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text));
+    return;
+  }
+
+
+  if (data.action === "web_results") {
+    renderWebResults(data.query || "Recherche web", data.items || [], data.images || []);
+    if (typeof data.text === "string") {
+      setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text));
+    }
     return;
   }
 
@@ -1296,6 +1370,10 @@ musicStopButtonEl.addEventListener("click", () => {
   stopMusic();
 });
 
+webHideButtonEl.addEventListener("click", () => {
+  setWebDockVisible(false);
+});
+
 musicHideButtonEl.addEventListener("click", () => {
   stopMusic();
 });
@@ -1308,6 +1386,7 @@ setAssistantName("J.A.R.V.I.S");
 setMusicStatus("Aucune musique chargee.");
 setMusicPlayerVisible(false);
 setMusicPlayerEmpty(true);
+setWebDockVisible(false);
 renderDebugState();
 injectVisionButton();
 scheduleHttpPolling(400);

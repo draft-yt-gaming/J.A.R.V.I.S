@@ -184,6 +184,16 @@ Important :
 Cela permet a l'interface de continuer a recevoir les reponses meme quand seul le port HTTP est expose publiquement.
 
 
+
+## Resultats web visuels
+
+Quand Jarvis effectue une recherche web, l'interface affiche un panneau lateral oppose au lecteur musique avec :
+- une galerie d'images quand SerpAPI en fournit ;
+- des cartes de resultats avec titres, extraits et liens cliquables ;
+- un bouton pour masquer le panneau.
+
+Les demandes de type `donne moi une recette de pate` sont converties en recherche web visuelle afin d'afficher des sources et images en plus de la reponse vocale.
+
 ## Ecoute vocale
 
 Depuis l'interface web, Jarvis peut recevoir une commande de deux facons :

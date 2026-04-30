@@ -3240,11 +3240,15 @@ def emby_resume_global():
     return " ".join(clean)
 
 
-def recherche_web_serpapi(query):
-    """Effectue une recherche sur Google via SerpAPI."""
+def recherche_web_serpapi_details(query):
+    """Effectue une recherche web et renvoie texte + cartes visuelles pour l'interface."""
     if not SERPAPI_CONFIGURED:
-        return "Tom, la clé SerpAPI n'est pas configurée dans le fichier d'environnement."
-    
+        return {
+            "text": "La cle SerpAPI n'est pas configuree dans le fichier d'environnement.",
+            "items": [],
+            "images": [],
+        }
+
     try:
         print(f"[WEB] Recherche SerpAPI pour : {query}")
         params = {
@@ -3256,31 +3260,93 @@ def recherche_web_serpapi(query):
         }
         r = requests.get("https://serpapi.com/search.json", params=params, timeout=10)
         data = r.json()
-        
-        # Extraction des actualités si présentes
-        if "news_results" in data:
-            news = data["news_results"][:3]
-            reponse = f"Voici les dernières actualités pour {query} :\n"
-            for n in news:
-                source = n.get("source", "Source inconnue")
-                titre = n.get("title", "")
-                reponse += f"- {titre} (via {source})\n"
-            return reponse
-            
-        # Extraction des résultats organiques sinon
-        if "organic_results" in data:
-            results = data["organic_results"][:3]
-            reponse = f"Voici ce que j'ai trouvé sur le web pour {query} :\n"
-            for r in results:
-                titre = r.get("title", "")
-                snippet = r.get("snippet", "")
-                reponse += f"- {titre} : {snippet}\n"
-            return reponse
-            
-        return f"Je n'ai rien trouvé de pertinent sur le web pour : {query}."
+
+        items = []
+        images = []
+        answer_box = data.get("answer_box") or {}
+        if answer_box:
+            answer_title = answer_box.get("title") or answer_box.get("type") or "Reponse rapide"
+            answer_snippet = answer_box.get("answer") or answer_box.get("snippet") or answer_box.get("definition") or ""
+            answer_link = answer_box.get("link") or answer_box.get("source") or ""
+            if answer_snippet:
+                items.append({
+                    "title": answer_title,
+                    "snippet": answer_snippet,
+                    "link": answer_link,
+                    "source": "Google",
+                })
+            if answer_box.get("thumbnail"):
+                images.append({"src": answer_box.get("thumbnail"), "alt": answer_title})
+
+        source_results = data.get("news_results") or data.get("organic_results") or []
+        for result in source_results[:6]:
+            title = result.get("title", "")
+            snippet = result.get("snippet") or result.get("date") or ""
+            link = result.get("link") or result.get("url") or ""
+            source = result.get("source") or result.get("displayed_link") or ""
+            thumbnail = result.get("thumbnail")
+            if title or snippet:
+                items.append({
+                    "title": title,
+                    "snippet": snippet,
+                    "link": link,
+                    "source": source,
+                })
+            if thumbnail:
+                images.append({"src": thumbnail, "alt": title or query})
+
+        for image in (data.get("images_results") or [])[:6]:
+            src = image.get("thumbnail") or image.get("original")
+            if src:
+                images.append({"src": src, "alt": image.get("title") or query})
+
+        seen = set()
+        deduped_items = []
+        for item in items:
+            key = (item.get("title", ""), item.get("link", ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_items.append(item)
+
+        seen_images = set()
+        deduped_images = []
+        for image in images:
+            src = image.get("src", "")
+            if not src or src in seen_images:
+                continue
+            seen_images.add(src)
+            deduped_images.append(image)
+
+        if not deduped_items:
+            return {
+                "text": f"Je n'ai rien trouve de pertinent sur le web pour : {query}.",
+                "items": [],
+                "images": deduped_images[:6],
+            }
+
+        response_lines = [f"Voici ce que j'ai trouve sur le web pour {query} :"]
+        for item in deduped_items[:3]:
+            title = item.get("title", "")
+            snippet = item.get("snippet", "")
+            response_lines.append(f"- {title} : {snippet}" if snippet else f"- {title}")
+
+        return {
+            "text": "\n".join(response_lines),
+            "items": deduped_items[:6],
+            "images": deduped_images[:6],
+        }
     except Exception as e:
         print(f"[WEB] Erreur SerpAPI : {e}")
-        return "Une erreur est survenue lors de la recherche sur internet."
+        return {
+            "text": "Une erreur est survenue lors de la recherche sur internet.",
+            "items": [],
+            "images": [],
+        }
+
+
+def recherche_web_serpapi(query):
+    return recherche_web_serpapi_details(query).get("text", "")
 
 PIECES_LUMIERES = {
     # Salon
@@ -4920,6 +4986,20 @@ async def resoudre_commandes_locales(texte):
 
     return None
 
+def requete_visuelle_web_locale(texte):
+    t = str(texte or "").lower().strip()
+    if re.search(r"\b(recette|cuisine|comment faire|preparer|préparer)\b", t):
+        query = re.sub(r"\b(donne moi|peux tu|peux-tu|trouve moi|cherche moi|une|un)\b", " ", texte, flags=re.IGNORECASE)
+        query = re.sub(r"\s+", " ", query).strip(" ,.!?;:")
+        if "recette" not in query.lower():
+            query = f"recette {query}"
+        return query
+    if any(k in t for k in ["cherche sur internet", "recherche web", "recherche internet", "cherche moi", "trouve moi"]):
+        query = re.sub(r"\b(cherche sur internet|recherche web|recherche internet|cherche moi|trouve moi|donne moi|peux tu|peux-tu)\b", " ", texte, flags=re.IGNORECASE)
+        query = re.sub(r"\s+", " ", query).strip(" ,.!?;:")
+        return query or texte.strip()
+    return None
+
 async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, http_client_id=""):
     global MODE_IRON_MAN, jarvis_actif, dernier_message, _skip_pc_audio
     COMMAND_CONTEXT.set(build_command_context(auth_user, client_id=http_client_id))
@@ -4934,6 +5014,10 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
     if not reponse: reponse = resoudre_francais_localement(texte_utilisateur)
     if not reponse: reponse = resoudre_conversion_localement(texte_utilisateur)
     if not reponse: reponse = resoudre_traduction_localement(texte_utilisateur)
+    if not reponse:
+        web_query = requete_visuelle_web_locale(texte_utilisateur)
+        if web_query:
+            reponse = json.dumps({"action": "recherche_web", "query": web_query}, ensure_ascii=False)
     
     # VISION (Regarde mon écran)
     if not reponse:
@@ -5378,8 +5462,15 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
             elif action == "recherche_web":
                 query = data.get("query", "")
                 await parler(f"Je lance une recherche sur internet pour {query}.")
-                result = recherche_web_serpapi(query)
-                await parler(result)
+                details = recherche_web_serpapi_details(query)
+                await send_web_action(
+                    "web_results",
+                    query=query,
+                    text=details.get("text", ""),
+                    items=details.get("items", []),
+                    images=details.get("images", []),
+                )
+                await parler(details.get("text", ""))
             elif action == "sport_resultats":
                 equipe = data.get("equipe") or None
                 ligue  = data.get("ligue")  or None

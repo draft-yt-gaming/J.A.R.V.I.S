@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>J.A.R.V.I.S</title>
-    <script type="module" crossorigin src="/assets/index-BRMD8mYa.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-itwnBxE3.css">
+    <script type="module" crossorigin src="/assets/index-BQzvuPqY.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CLokUuzu.css">
   </head>
   <body>
     <!-- Three.js renders here -->
@@ -57,6 +57,19 @@
       <div id="user-text" class="speech-bubble user-bubble"></div>
       <div id="jarvis-text" class="speech-bubble jarvis-bubble"></div>
     </div>
+
+
+    <section id="web-dock" class="web-dock is-hidden" aria-live="polite">
+      <div class="web-dock-head">
+        <div>
+          <div class="web-dock-kicker">recherche web</div>
+          <div id="web-dock-title" class="web-dock-title">Aucun resultat.</div>
+        </div>
+        <button id="web-hide-button" type="button" aria-label="Masquer les resultats">×</button>
+      </div>
+      <div id="web-image-strip" class="web-image-strip"></div>
+      <div id="web-result-list" class="web-result-list"></div>
+    </section>
 
     <section id="music-dock" class="music-dock is-hidden" aria-live="polite">
       <div class="music-dock-head">
