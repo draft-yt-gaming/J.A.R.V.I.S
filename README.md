@@ -43,7 +43,9 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - `mobile/` : ancienne interface mobile / ressources annexes
 - `start_jarvis.sh` : lancement local classique
 - `start_jarvis_vm.sh` : lancement VM/headless
+- `.env.example` : modele versionne des variables de configuration
 - `scripts/update_jarvis.sh` : mise a jour depuis GitHub sans ecraser les reglages locaux
+- `scripts/check_env_updates.py` : detection des nouvelles cles de configuration apres mise a jour
 - `jarvis_agent.py` : agent auxiliaire
 - `generated_images/` : images generees
 - `jarvis_memoire.json` : memoire persistante runtime
@@ -90,7 +92,13 @@ cd ..
 
 ### 4. Configurer l'environnement
 
-Creer un fichier `.env` a la racine. Exemple minimal :
+Creer un fichier `.env` a la racine. Le fichier `.env.example` contient la liste versionnee des variables possibles et reste mis a jour par Git.
+
+```bash
+cp .env.example .env
+```
+
+Exemple minimal :
 
 ```env
 GEMINI_API_KEY=VOTRE_CLE_OU_PLUSIEURS_CLES_SEPAREES_PAR_VIRGULE
@@ -141,6 +149,7 @@ bash scripts/update_jarvis.sh
 Le script :
 - fonctionne avec un clone HTTPS public, sans cle SSH GitHub ;
 - sauvegarde `.env`, `jarvis_runtime_settings.json` et `jarvis_memoire.json` dans `.jarvis_backups/` ;
+- compare `.env.example` avec `.env` et les reglages du dashboard pour signaler les nouvelles cles a ajouter ;
 - recupere la derniere version de la branche `main` sur GitHub ;
 - refuse de continuer si des fichiers suivis ont ete modifies localement, sauf avec `--force` ;
 - met a jour `requirements.txt` et/ou le frontend seulement si les fichiers concernes ont change ;
@@ -152,6 +161,8 @@ Options utiles :
 bash scripts/update_jarvis.sh --no-restart
 bash scripts/update_jarvis.sh --branch main
 ```
+
+Quand une nouvelle integration ajoute une variable, par exemple `GITHUB_API_KEY`, elle est ajoutee dans `.env.example`. Au prochain `bash scripts/update_jarvis.sh`, Jarvis affiche les nouvelles cles absentes de l'installation locale sans modifier le `.env`.
 
 Aucune API hebergee en plus n'est necessaire pour ce fonctionnement : GitHub sert de canal de mise a jour. Une API publique ne devient utile que si tu veux plus tard afficher une annonce de version dans l'interface ou gerer des canaux `stable` / `beta`.
 

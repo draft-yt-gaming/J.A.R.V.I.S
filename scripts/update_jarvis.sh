@@ -93,6 +93,8 @@ CHANGED_FILES="$(git diff --name-only "$OLD_REV" "$NEW_REV")"
 REQ_CHANGED=0
 FRONTEND_DEPS_CHANGED=0
 FRONTEND_BUILD_NEEDED=0
+ENV_EXAMPLE_CHANGED=0
+ENV_KEYS_TO_CHECK=""
 if printf '%s\n' "$CHANGED_FILES" | grep -q '^requirements.txt$'; then
   REQ_CHANGED=1
 fi
@@ -102,10 +104,24 @@ fi
 if printf '%s\n' "$CHANGED_FILES" | grep -Eq '^frontend/(src/|public/|index.html|package.json|package-lock.json)'; then
   FRONTEND_BUILD_NEEDED=1
 fi
+if printf '%s\n' "$CHANGED_FILES" | grep -q '^.env.example$'; then
+  ENV_EXAMPLE_CHANGED=1
+  OLD_ENV_KEYS="$(mktemp)"
+  NEW_ENV_KEYS="$(mktemp)"
+  git show "$OLD_REV:.env.example" 2>/dev/null | sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\2/p' | sort -u > "$OLD_ENV_KEYS" || true
+  git show "$NEW_REV:.env.example" 2>/dev/null | sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\2/p' | sort -u > "$NEW_ENV_KEYS" || true
+  ENV_KEYS_TO_CHECK="$(comm -13 "$OLD_ENV_KEYS" "$NEW_ENV_KEYS" || true)"
+  rm -f "$OLD_ENV_KEYS" "$NEW_ENV_KEYS"
+fi
 
 info "Application de la mise a jour..."
 git merge --ff-only "$TARGET"
 ok "Code mis a jour: $OLD_REV -> $NEW_REV"
+
+if [ "$ENV_EXAMPLE_CHANGED" -eq 1 ] && [ -f scripts/check_env_updates.py ]; then
+  info "Verification des nouvelles cles de configuration..."
+  JARVIS_ENV_KEYS_TO_CHECK="$ENV_KEYS_TO_CHECK" python3 scripts/check_env_updates.py || true
+fi
 
 if [ "$REQ_CHANGED" -eq 1 ]; then
   if [ -x venv/bin/pip ]; then
