@@ -66,6 +66,28 @@ apt-get install -y python3-venv python3-pip python3-dev build-essential pkg-conf
   portaudio19-dev libasound2-dev libffi-dev libssl-dev nodejs npm
 ```
 
+
+## Performances recommandees
+
+Les besoins changent beaucoup selon les modules actives. Les API cloud comme Gemini, Groq, xAI, YouTube, SerpAPI, Open-Meteo ou NASA font surtout travailler Internet et consomment peu de CPU local. Les modules locaux comme le micro, le TTS, la vision et surtout Ollama demandent plus de ressources.
+
+| Usage | CPU conseille | RAM conseillee | Stockage | Notes |
+| --- | --- | --- | --- | --- |
+| Installation minimale, commandes texte, APIs cloud | 2 coeurs | 2 Go | 4 Go libres | Suffisant pour une VM legere si le frontend est deja build. |
+| VM web quotidienne avec dashboard, micro navigateur, TTS Edge et mini-player | 2 a 4 coeurs | 4 Go | 8 Go libres | Profil recommande pour l'usage standard auto-heberge. |
+| Vision navigateur / capture ecran / camera locale | 4 coeurs | 4 a 8 Go | 10 Go libres | Plus confortable si plusieurs captures ou traitements image sont utilises. |
+| Ollama local petits modeles 3B/4B quantifies | 4 coeurs | 8 Go | 15 a 30 Go libres | Possible sans GPU, mais les reponses peuvent etre lentes. |
+| Ollama local modeles 7B/8B quantifies | 6 a 8 coeurs | 16 Go | 30 a 60 Go libres | GPU NVIDIA/Apple Silicon conseille pour une experience fluide. |
+| Ollama local gros modeles 13B+ | 8 coeurs+ | 32 Go+ | 60 Go+ | A reserver a une machine dediee ou une carte graphique adaptee. |
+
+Notes par integration :
+- `GEMINI_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `YOUTUBE_API_KEY`, `SERPAPI_API_KEY`, `NASA_API_KEY` : tres peu de charge locale, surtout besoin d'une connexion stable.
+- `HA_URL` / `HA_TOKEN`, Proxmox et Emby : charge locale faible, mais le reseau local doit etre fiable.
+- Extension Chrome : charge faible cote serveur, sauf si beaucoup d'utilisateurs generent des resumes/TTS en meme temps.
+- TTS Edge : consomme peu localement mais depend du service distant et genere des fichiers audio temporaires.
+- WebApp iPhone/iPad : le micro doit etre ouvert en HTTPS ; la charge principale reste cote serveur Jarvis.
+- Ollama : c'est le seul module qui peut vraiment changer la taille de la machine necessaire. Choisir le modele selon la RAM disponible.
+
 ## Installation
 
 ### 1. Cloner le projet
