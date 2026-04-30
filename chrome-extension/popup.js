@@ -136,6 +136,9 @@ async function extractPage() {
     files: ["content.js"],
   });
   if (!page?.text) throw new Error("Je n'arrive pas a lire le texte de cette page.");
+  if (page.text.trim().length < 120) {
+    throw new Error("Le texte lisible de cette page est trop court pour faire un resume fiable.");
+  }
   return page;
 }
 

@@ -4141,6 +4141,71 @@ def resoudre_infos_systeme_localement(texte):
 
     return None
 
+async def resumer_page_extension(page_title, page_url, page_text):
+    system_instruction = (
+        "Tu es le mode extension Chrome de J.A.R.V.I.S. "
+        "Tu dois resumer uniquement le texte de page fourni par l'extension. "
+        "N'essaie jamais d'ouvrir l'URL, ne demande pas a l'utilisateur de copier-coller le contenu, "
+        "et ne parle pas d'une impossibilite d'acceder a des URL externes. "
+        "Si le texte fourni est insuffisant, dis seulement que le contenu lisible de la page est insuffisant."
+    )
+    prompt = (
+        "Resume clairement en francais le CONTENU DE PAGE FOURNI ci-dessous.\n"
+        "Format attendu:\n"
+        "Resume court: 2 a 4 phrases.\n"
+        "Points importants: 5 puces maximum.\n"
+        "A noter: dates, prix, actions ou avertissements s'il y en a.\n\n"
+        f"Titre: {page_title or 'Sans titre'}\n"
+        f"URL informative, ne pas ouvrir: {page_url or 'URL inconnue'}\n"
+        "CONTENU DE PAGE FOURNI:\n"
+        f"{page_text}"
+    )
+
+    if client:
+        last_err = None
+        contents = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+        for model_name in MODELS_LIST:
+            try:
+                response = await gemini_generate_with_failover(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.25,
+                    ),
+                    timeout=20.0,
+                )
+                if response.text:
+                    return response.text.strip()
+            except Exception as e:
+                print(f"[EXTENSION] Echec resume Gemini {model_name} : {e}")
+                last_err = e
+        print(f"[EXTENSION] Gemini indisponible pour resume : {last_err}")
+
+    fallback_prompt = f"{system_instruction}\n\n{prompt}"
+    if groq_client:
+        try:
+            rep_groq = await demander_groq(fallback_prompt)
+            if rep_groq:
+                return rep_groq.strip()
+        except Exception as e:
+            print(f"[EXTENSION] Echec resume Groq : {e}")
+
+    if grok_client:
+        try:
+            rep_grok = await demander_grok(fallback_prompt)
+            if rep_grok:
+                return rep_grok.strip()
+        except Exception as e:
+            print(f"[EXTENSION] Echec resume Grok : {e}")
+
+    rep_ollama = await demander_ollama(fallback_prompt)
+    if rep_ollama:
+        return rep_ollama.strip()
+
+    return "Je n'ai pas pu generer le resume pour le moment, mais le texte de la page a bien ete transmis par l'extension."
+
+
 async def demander_ia(texte):
 
     global is_thinking, GEMINI_QUOTA_BLOCKED_UNTIL
@@ -5725,16 +5790,8 @@ def start_http_interface_server():
         max_chars = 30000
         truncated = len(page_text) > max_chars
         page_text = page_text[:max_chars]
-        prompt = (
-            "Resume clairement en francais la page web ci-dessous. "
-            "Donne d'abord un resume court, puis 5 points importants maximum. "
-            "Si la page contient des actions, prix, dates ou avertissements, indique-les.\n\n"
-            f"Titre: {page_title or 'Sans titre'}\n"
-            f"URL: {page_url or 'URL inconnue'}\n"
-            f"Texte de la page:\n{page_text}"
-        )
         try:
-            summary = asyncio.run(demander_ia(prompt))
+            summary = asyncio.run(resumer_page_extension(page_title, page_url, page_text))
         except Exception as e:
             print(f"[EXTENSION] Erreur resume page : {e}")
             return jsonify({"error": "summarize_failed", "detail": str(e)}), 500
