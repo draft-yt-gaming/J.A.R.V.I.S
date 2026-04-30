@@ -841,7 +841,21 @@ def build_discord_show_button(summary_id):
     }]
 
 
-def post_discord_followup(application_id, interaction_token, content, summary_id=""):
+async def generate_discord_summary_mp3(summary):
+    text_to_speak = str(summary or "").strip()
+    if not text_to_speak:
+        return None
+    text_to_speak = text_to_speak[:4000]
+    text_to_speak = re.sub(r"[*#`_>\[\]()]", "", text_to_speak).strip()
+    if not text_to_speak:
+        return None
+    output_file = BASE_DIR / f"discord_summary_{int(time.time() * 1000)}_{secrets.token_hex(4)}.mp3"
+    communicate = edge_tts.Communicate(text_to_speak, voice=JARVIS_TTS_VOICE)
+    await communicate.save(str(output_file))
+    return output_file
+
+
+def post_discord_followup(application_id, interaction_token, content, summary_id="", audio_path=None):
     app_id = str(application_id or DISCORD_CLIENT_ID or "").strip()
     token = str(interaction_token or "").strip()
     if not app_id or not token:
@@ -856,11 +870,17 @@ def post_discord_followup(application_id, interaction_token, content, summary_id
     if summary_id:
         payload["components"] = build_discord_show_button(summary_id)
     try:
-        response = requests.post(
-            f"https://discord.com/api/v10/webhooks/{app_id}/{token}",
-            json=payload,
-            timeout=15,
-        )
+        url = f"https://discord.com/api/v10/webhooks/{app_id}/{token}"
+        if audio_path and Path(audio_path).exists():
+            with open(audio_path, "rb") as audio_file:
+                response = requests.post(
+                    url,
+                    data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+                    files={"files[0]": ("resume-j.a.r.v.i.s.mp3", audio_file, "audio/mpeg")},
+                    timeout=30,
+                )
+        else:
+            response = requests.post(url, json=payload, timeout=15)
         if 200 <= response.status_code < 300:
             return True
         print(f"[DISCORD] Echec followup {response.status_code}: {response.text[:500]}")
@@ -889,19 +909,35 @@ def build_public_discord_summary_response(summary_id):
     }
 
 
-def process_discord_message_summary(payload):
+async def process_discord_message_summary_async(payload):
+    audio_path = None
     try:
         target = extract_discord_target_message(payload)
-        summary = asyncio.run(resumer_message_discord(
+        summary = await resumer_message_discord(
             author=target["author"],
             content=target["content"],
             jump_url=target["jump_url"],
-        ))
+        )
+        try:
+            audio_path = await generate_discord_summary_mp3(summary)
+        except Exception as e:
+            print(f"[DISCORD] Erreur generation MP3 : {e}")
     except Exception as e:
         print(f"[DISCORD] Erreur resume message : {e}")
         summary = "Je n'ai pas pu resumer ce message pour le moment."
-    summary_id = cache_discord_summary(summary)
-    post_discord_followup(payload.get("application_id"), payload.get("token"), summary, summary_id=summary_id)
+    try:
+        summary_id = cache_discord_summary(summary)
+        post_discord_followup(payload.get("application_id"), payload.get("token"), summary, summary_id=summary_id, audio_path=audio_path)
+    finally:
+        try:
+            if audio_path and Path(audio_path).exists():
+                Path(audio_path).unlink()
+        except Exception:
+            pass
+
+
+def process_discord_message_summary(payload):
+    asyncio.run(process_discord_message_summary_async(payload))
 
 
 def build_command_context(auth_user=None, client_id=""):
