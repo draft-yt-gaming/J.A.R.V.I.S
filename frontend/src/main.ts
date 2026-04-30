@@ -350,8 +350,8 @@ function setMuted(muted: boolean): void {
 function setMicListening(listening: boolean): void {
   micButtonEl.classList.toggle("is-listening", listening);
   micButtonEl.setAttribute("aria-pressed", String(listening));
-  micButtonEl.setAttribute("aria-label", listening ? "Arreter l'ecoute" : "Parler a JARVIS");
-  micButtonEl.title = listening ? "Arreter l'ecoute" : "Parler a JARVIS";
+  micButtonEl.setAttribute("aria-label", listening ? "Arreter l'ecoute" : "Parler a J.A.R.V.I.S");
+  micButtonEl.title = listening ? "Arreter l'ecoute" : "Parler a J.A.R.V.I.S";
   setMusicDucking(listening && speechMode === "manual");
 }
 
@@ -1314,7 +1314,7 @@ function startWakeListening(): void {
 function startManualListening(options: { preserveConversation?: boolean } = {}): void {
   if (!pageCanUseMicrophone()) return;
   if (shouldBlockMobileMicroForHttps()) {
-    showError("Sur iPhone/iPad, ouvre JARVIS en HTTPS pour autoriser le micro.");
+    showError("Sur iPhone/iPad, ouvre J.A.R.V.I.S en HTTPS pour autoriser le micro.");
     return;
   }
   if (!recognition) return;

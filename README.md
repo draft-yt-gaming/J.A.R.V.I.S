@@ -45,7 +45,7 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - `start_jarvis_vm.sh` : lancement VM/headless
 - `.env.example` : modele versionne des variables de configuration
 - `scripts/update_jarvis.sh` : mise a jour depuis GitHub sans ecraser les reglages locaux
-- `scripts/proxmox_create_lxc.sh` : assistant de creation d'un CT/LXC JARVIS sur Proxmox
+- `scripts/proxmox_create_lxc.sh` : assistant de creation d'un CT/LXC J.A.R.V.I.S sur Proxmox
 - `scripts/check_env_updates.py` : detection des nouvelles cles de configuration apres mise a jour
 - `jarvis_agent.py` : agent auxiliaire
 - `generated_images/` : images generees
@@ -238,7 +238,7 @@ Puis configure `OLLAMA_ENABLED=true` et `OLLAMA_MODELS=llama3.1:8b` dans le dash
 
 ## Installation Proxmox CT/LXC
 
-JARVIS peut tourner dans un container LXC Proxmox pour l'usage web/headless. C'est plus leger qu'une VM, tant que l'on ne depend pas d'un bureau Linux local, d'un micro USB branche au serveur ou d'un passthrough GPU complexe.
+J.A.R.V.I.S peut tourner dans un container LXC Proxmox pour l'usage web/headless. C'est plus leger qu'une VM, tant que l'on ne depend pas d'un bureau Linux local, d'un micro USB branche au serveur ou d'un passthrough GPU complexe.
 
 Un assistant interactif est fourni pour etre lance **sur l'hote Proxmox**, en root, avec une seule commande :
 
@@ -255,7 +255,7 @@ bash /tmp/jarvis-proxmox-lxc.sh
 ```
 
 
-Le fichier est servi directement par JARVIS via `/install/proxmox-lxc.sh`, ce qui evite de dependre d'un acces raw GitHub public.
+Le fichier est servi directement par J.A.R.V.I.S via `/install/proxmox-lxc.sh`, ce qui evite de dependre d'un acces raw GitHub public.
 
 Si le depot est deja clone sur l'hote Proxmox, tu peux aussi lancer :
 
@@ -263,7 +263,7 @@ Si le depot est deja clone sur l'hote Proxmox, tu peux aussi lancer :
 bash scripts/proxmox_create_lxc.sh
 ```
 
-Le script propose un mode simple et un mode avance. En mode simple, il demande seulement le nom du CT, le bridge reseau detecte automatiquement avec choix numerote (`1 = vmbr0`, `2 = vmbr1`, etc.), l'IP DHCP/statique et le mot de passe root. En mode avance, il demande aussi l'ID du CT, les storages, disque, CPU, RAM, swap, ports JARVIS, CT privilegie ou non, et demarrage automatique. Il cree ensuite un CT Debian, installe les dependances, clone le depot en HTTPS, build le frontend, cree un `.env` depuis `.env.example`, genere `JARVIS_SESSION_SECRET`, installe le service `jarvis-vm.service` et le demarre.
+Le script propose un mode simple et un mode avance. En mode simple, il demande seulement le nom du CT, le bridge reseau detecte automatiquement avec choix numerote (`1 = vmbr0`, `2 = vmbr1`, etc.), l'IP DHCP/statique et le mot de passe root. En mode avance, il demande aussi l'ID du CT, les storages, disque, CPU, RAM, swap, ports J.A.R.V.I.S, CT privilegie ou non, et demarrage automatique. Il cree ensuite un CT Debian, installe les dependances, clone le depot en HTTPS, build le frontend, cree un `.env` depuis `.env.example`, genere `JARVIS_SESSION_SECRET`, installe le service `jarvis-vm.service` et le demarre.
 
 Valeurs utilisees par le mode simple pour un CT standard :
 - 2 CPU cores ;
@@ -273,7 +273,7 @@ Valeurs utilisees par le mode simple pour un CT standard :
 - CT non privilegie ;
 - features Proxmox `nesting=1,keyctl=1`.
 
-Apres installation, les API keys restent a configurer dans le dashboard JARVIS ou dans `/opt/jarvis/.env` a l'interieur du CT.
+Apres installation, les API keys restent a configurer dans le dashboard J.A.R.V.I.S ou dans `/opt/jarvis/.env` a l'interieur du CT.
 
 Commande de mise a jour depuis l'hote Proxmox :
 
@@ -285,7 +285,7 @@ Limites a connaitre :
 - le micro iPhone/iPad/WebApp fonctionne, car il vient du navigateur et non du CT ;
 - une camera ou un micro USB branches au serveur demandent une configuration LXC speciale ;
 - Ollama peut tourner en CT pour CPU, mais les gros modeles et le GPU passthrough sont souvent plus simples en VM ou sur l'hote ;
-- pour exposer JARVIS sur Internet, garder HTTPS/tunnel/reverse proxy et proteger le dashboard.
+- pour exposer J.A.R.V.I.S sur Internet, garder HTTPS/tunnel/reverse proxy et proteger le dashboard.
 
 ## Lancement
 
@@ -420,7 +420,7 @@ Le nom de reveil utilise la valeur `assistant_name` reglable dans le dashboard. 
 
 ## Discord : resumer un message
 
-Jarvis peut etre relie a une application Discord pour resumer un message depuis le menu contextuel : clic droit sur un message, `Applications`, puis `Resumer avec JARVIS`.
+J.A.R.V.I.S peut etre relie a une application Discord pour resumer un message depuis le menu contextuel : clic droit sur un message, `Applications`, puis `Resumer avec J.A.R.V.I.S`.
 
 Configuration :
 

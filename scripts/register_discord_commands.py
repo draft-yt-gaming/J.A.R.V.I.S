@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Register JARVIS Discord application commands."""
+"""Register J.A.R.V.I.S Discord application commands."""
 import json
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 SETTINGS_FILE = BASE_DIR / "jarvis_runtime_settings.json"
-COMMAND_NAME = "Resumer avec JARVIS"
+COMMAND_NAME = "Resumer avec J.A.R.V.I.S"
 API_BASE = "https://discord.com/api/v10"
 
 
@@ -42,7 +42,7 @@ def main():
     application_id = load_runtime_value("DISCORD_CLIENT_ID")
     bot_token = load_runtime_value("DISCORD_BOT_TOKEN")
     if not application_id or not bot_token:
-        raise SystemExit("DISCORD_CLIENT_ID et DISCORD_BOT_TOKEN sont requis dans .env ou le dashboard JARVIS.")
+        raise SystemExit("DISCORD_CLIENT_ID et DISCORD_BOT_TOKEN sont requis dans .env ou le dashboard J.A.R.V.I.S.")
 
     command_payload = {
         "name": COMMAND_NAME,
@@ -64,7 +64,7 @@ def main():
     print(f"Commande Discord {action}: {command.get('name')} ({command.get('id')})")
     print("Endpoint a configurer dans Discord Developer Portal:")
     print("  https://TON_DOMAINE/api/discord/interactions")
-    print("Ensuite: clic droit sur un message -> Applications -> Resumer avec JARVIS.")
+    print("Ensuite: clic droit sur un message -> Applications -> Resumer avec J.A.R.V.I.S.")
 
 
 if __name__ == "__main__":

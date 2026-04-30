@@ -1853,7 +1853,7 @@ def construire_system_prompt():
     )
     base = (
         identity_directive + "\n" + access_directive + "\n\n" +
-        "Tu es JARVIS, une IA sophistiquée, élégante et experte mondiale. Tom est ton créateur. "
+        "Tu es J.A.R.V.I.S, une IA sophistiquée, élégante et experte mondiale. Tom est ton créateur. "
         "Tu possèdes une expertise de niveau professionnel dans les domaines suivants :\n"
         "- Mathématiques : Tu es un mathématicien hors pair. Pour les problèmes complexes, fournis des solutions détaillées étape par étape, explique les théorèmes et aide Tom à comprendre la logique mathématique.\n"
         "- Langue Française : Tu es un Professeur de Français émérite. Ton orthographe, ta grammaire et ta syntaxe sont irréprochables. Tu peux expliquer des règles complexes, analyser des textes littéraires et aider à la rédaction de documents élégants.\n"
@@ -2215,7 +2215,7 @@ async def jarvis_vision_cliquer(instruction):
         img = Image.open(path_ss)
         img_w, img_h = img.size
         prompt_vision = (
-            f"Tu es l'oeil de JARVIS. Voici une capture de l'écran de Tom ({img_w}x{img_h} pixels).\n"
+            f"Tu es l'oeil de J.A.R.V.I.S. Voici une capture de l'écran de Tom ({img_w}x{img_h} pixels).\n"
             f"Instruction : {instruction}\n"
             "Trouve l'élément demandé (bouton, texte, icône ou numéro dans une liste) sur l'écran.\n"
             "Si l'instruction mentionne un chiffre (ex: 'musique numéro 4'), cherche ce chiffre ou le morceau correspondant dans la liste.\n"
@@ -2273,7 +2273,7 @@ async def jarvis_vision_ecrire(instruction, texte_a_taper):
         img = Image.open(path_ss)
         img_w, img_h = img.size
         prompt_vision = (
-            f"Tu es la vision de JARVIS. Tom veut écrire dans le champ : {instruction}.\n"
+            f"Tu es la vision de J.A.R.V.I.S. Tom veut écrire dans le champ : {instruction}.\n"
             f"Résolution de la capture : {img_w}x{img_h} pixels.\n"
             "Trouve EXACTEMENT la position de ce champ de saisie de texte.\n"
             "Les coordonnées sont normalisées de 0 à 1000.\n"
@@ -2328,7 +2328,7 @@ async def jarvis_vision_rechercher_sur_site(texte_recherche):
         img = Image.open(path_ss)
         img_w, img_h = img.size
         prompt_vision = (
-            f"Tu es la vision de JARVIS. Tom veut faire une recherche sur le site affiché à l'écran.\n"
+            f"Tu es la vision de J.A.R.V.I.S. Tom veut faire une recherche sur le site affiché à l'écran.\n"
             f"Résolution de la capture : {img_w}x{img_h} pixels.\n"
             "Localise la BARRE DE RECHERCHE principale du site (champ search, zone avec icône loupe, "
             "placeholder 'Rechercher', 'Search', 'Chercher'...).\n"
@@ -4189,7 +4189,7 @@ async def parler(texte):
     # Nettoyage des caractères de mise en forme Markdown pour le TTS
     texte_tts = texte.replace("**", "").replace("*", "").replace("#", "").replace("`", "").strip()
     
-    # ENREGISTRER CE QUE JARVIS DIT DANS SA MÉMOIRE
+    # ENREGISTRER CE QUE J.A.R.V.I.S DIT DANS SA MÉMOIRE
     if historique and len(historique) > 0:
         dernier_texte_modele = historique[-1].parts[0].text
         if dernier_texte_modele != texte:
@@ -4261,7 +4261,7 @@ def reponse_locale(texte):
     
     # Identité
     if any(m in t for m in ["qui es-tu", "ton nom", "quelle es ton identité", "t'appelle comment"]):
-        return "Je suis JARVIS, votre assistant personnel et système informatique. Mes serveurs principaux sont actuellement en maintenance, mais je reste opérationnel localement."
+        return "Je suis J.A.R.V.I.S, votre assistant personnel et système informatique. Mes serveurs principaux sont actuellement en maintenance, mais je reste opérationnel localement."
     
     # Créateur
     if any(m in t for m in ["ton créateur", "t'as créé", "qui est tom"]):
@@ -4292,7 +4292,7 @@ def normaliser_commande_api(texte):
 
 
 def jarvis_api_headers():
-    return {"User-Agent": "JARVIS-VM/1.0 (local assistant; contact: local)"}
+    return {"User-Agent": "J.A.R.V.I.S-VM/1.0 (local assistant; contact: local)"}
 
 
 def nettoyer_requete_generique(texte, mots):
@@ -5283,7 +5283,7 @@ async def demander_grok(texte):
     
     try:
         # Conversion de l'historique Gemini vers format OpenAI pour Grok
-        messages = [{"role": "system", "content": "Tu es JARVIS, l'IA de Tom. Tu utilises actuellement ton module Grok pour les infos en temps reel."}]
+        messages = [{"role": "system", "content": "Tu es J.A.R.V.I.S, l'IA de Tom. Tu utilises actuellement ton module Grok pour les infos en temps reel."}]
         for h in historique[-6:]: # Limiter aux 6 derniers messages pour eviter de saturer le contexte
             role = "user" if h.role == "user" else "assistant"
             msg_text = h.parts[0].text
@@ -5315,7 +5315,7 @@ async def demander_ollama(texte):
         return None
     try:
         # On prépare les messages au format Ollama (compatible OpenAI)
-        messages = [{"role": "system", "content": "Tu es JARVIS, l'IA de Tom. Tu utilises actuellement ton module local Ollama. Réponds en français, de façon concise et élégante."}]
+        messages = [{"role": "system", "content": "Tu es J.A.R.V.I.S, l'IA de Tom. Tu utilises actuellement ton module local Ollama. Réponds en français, de façon concise et élégante."}]
         for h in historique[-4:]:
             role = "user" if h.role == "user" else "assistant"
             messages.append({"role": role, "content": h.parts[0].text})
@@ -5362,7 +5362,7 @@ async def demander_groq(texte):
         return None
     
     try:
-        messages = [{"role": "system", "content": "Tu es JARVIS, l'IA de Tom. Tu utilises actuellement le modèle Llama 3.3 de Groq pour répondre rapidement."}]
+        messages = [{"role": "system", "content": "Tu es J.A.R.V.I.S, l'IA de Tom. Tu utilises actuellement le modèle Llama 3.3 de Groq pour répondre rapidement."}]
         for h in historique[-6:]:
             role = "user" if h.role == "user" else "assistant"
             messages.append({"role": role, "content": h.parts[0].text})
@@ -5778,7 +5778,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
     if not reponse:
         reponse = await demander_ia(texte_utilisateur)
     
-    print(f"[JARVIS] {reponse}")
+    print(f"[J.A.R.V.I.S] {reponse}")
 
     # Si commande mobile : activer le flag pour couper l'audio PC et répondre via mobile
     if mobile_ws:
@@ -5797,7 +5797,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
 
     for block in json_blocks:
         try:
-            print(f"[JARVIS] Execution de l'action : {block}")
+            print(f"[J.A.R.V.I.S] Execution de l'action : {block}")
             # Timeout de 15s pour chaque action pour eviter de freezer Jarvis
             data = json.loads(block)
             action = data.get("action", "")
@@ -6082,7 +6082,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
                     ha_appeler_service("vacuum", "return_to_base", "vacuum.bob")
                     await parler("Bob retourne à sa base.")
             elif action == "create_doc":
-                titre   = data.get("title",   "Document JARVIS")
+                titre   = data.get("title",   "Document J.A.R.V.I.S")
                 contenu = data.get("content", "")
                 result  = creer_google_doc(titre, contenu)
                 await parler(result)
@@ -6091,7 +6091,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
                 result  = modifier_google_doc(contenu)
                 await parler(result)
             elif action == "create_sheet":
-                titre  = data.get("title", "Feuille JARVIS")
+                titre  = data.get("title", "Feuille J.A.R.V.I.S")
                 result = creer_google_sheet(titre)
                 await parler(result)
             elif action == "read_emails":
@@ -6299,7 +6299,7 @@ async def traiter_reponse_ia(texte_utilisateur, mobile_ws=None, auth_user=None, 
         except Exception as e:
             print(f"[ACTION ERROR] Block failed: {block} | Error: {e}")
             if grok_client:
-                print("[JARVIS] Bascule sur Grok suite a une erreur d'action...")
+                print("[J.A.R.V.I.S] Bascule sur Grok suite a une erreur d'action...")
                 res_grok = await demander_grok(f"Tom m'a demandé : {texte_utilisateur}. J'ai tenté de lancer une action mais j'ai eu une erreur technique ({e}). Peux-tu prendre le relais et lui répondre élégamment ?")
                 if res_grok: await parler(res_grok)
             continue
@@ -6338,13 +6338,13 @@ def ecouter():
     with mic as source:
         r.adjust_for_ambient_noise(source, duration=1)
 
-    print("[JARVIS] Microphone pret. En attente de 'Jarvis' ou session active...")
+    print("[J.A.R.V.I.S] Microphone pret. En attente de 'Jarvis' ou session active...")
 
     while True:
         try:
             # GESTION DU TIMEOUT DE SESSION
             if jarvis_actif and (time.time() - dernier_message > SESSION_TIMEOUT):
-                print("[JARVIS] Timeout session. Retour en veille.")
+                print("[J.A.R.V.I.S] Timeout session. Retour en veille.")
                 jarvis_actif = False
 
             with mic as source:
@@ -6381,7 +6381,7 @@ def ecouter():
 
             if WAKE_WORD in texte or jarvis_actif:
                 if WAKE_WORD in texte:
-                    print("[JARVIS] Mot-clé détecté.")
+                    print("[J.A.R.V.I.S] Mot-clé détecté.")
                     jarvis_actif = True
                 
                 dernier_message = time.time()
@@ -6429,7 +6429,7 @@ def monitor_claps():
                 data = stream.read(1024, exception_on_overflow=False)
                 rms  = audioop.rms(data, 2)
                 
-                # ON IGNORE LE CLAP UNIQUEMENT SI LE MODE IRON MAN EST ÉTEINT OU SI JARVIS PARLE
+                # ON IGNORE LE CLAP UNIQUEMENT SI LE MODE IRON MAN EST ÉTEINT OU SI J.A.R.V.I.S PARLE
                 if not MODE_IRON_MAN or is_speaking or is_thinking:
                     last_clap_time = 0
                     continue
@@ -6502,7 +6502,7 @@ def start_ia():
         loop.run_until_complete(parler("Bonjour, Tom"))
     loop.close()
     if JARVIS_HEADLESS:
-        print("[JARVIS] Mode web/VM actif. En attente des commandes depuis l'interface web.")
+        print("[J.A.R.V.I.S] Mode web/VM actif. En attente des commandes depuis l'interface web.")
         while True:
             time.sleep(1)
     else:
@@ -6548,7 +6548,7 @@ distinguished_name=req_distinguished_name
 x509_extensions=v3_req
 prompt=no
 [req_distinguished_name]
-CN=JARVIS Local
+CN=J.A.R.V.I.S Local
 [v3_req]
 subjectAltName={san}
 """.format(san=",".join(san_entries)))
@@ -6661,7 +6661,7 @@ def start_http_interface_server():
         return jsonify({
             "type": 4,
             "data": {
-                "content": "Cette interaction Discord n'est pas encore prise en charge par JARVIS.",
+                "content": "Cette interaction Discord n'est pas encore prise en charge par J.A.R.V.I.S.",
                 "flags": 64,
                 "allowed_mentions": {"parse": []},
             },
@@ -6954,7 +6954,7 @@ def main():
     frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
     frontend_process = None
     if not JARVIS_HEADLESS and os.path.exists(frontend_dir):
-        print("[JARVIS] Lancement automatique de l'interface Web (Vite)...")
+        print("[J.A.R.V.I.S] Lancement automatique de l'interface Web (Vite)...")
         frontend_process = subprocess.Popen(["npm", "run", "dev"], cwd=frontend_dir)
         time.sleep(2.5)  # Laisser le temps a Vite de demarrer
 
@@ -6976,18 +6976,18 @@ def main():
         while True:
             time.sleep(1)
             if not JARVIS_HEADLESS and interface_deja_connectee and len(CONNECTED_CLIENTS) == 0:
-                print("\n[JARVIS] Interface déconnectée. Attente de reconnexion (60s)...")
+                print("\n[J.A.R.V.I.S] Interface déconnectée. Attente de reconnexion (60s)...")
                 time.sleep(60)
                 if len(CONNECTED_CLIENTS) == 0:
-                    print("[JARVIS] Aucune reconnexion. Extinction automatique...")
+                    print("[J.A.R.V.I.S] Aucune reconnexion. Extinction automatique...")
                     break
                 else:
-                    print("[JARVIS] Reconnexion détectée. Reprise.")
+                    print("[J.A.R.V.I.S] Reconnexion détectée. Reprise.")
     except KeyboardInterrupt:
-        print("\n[JARVIS] Arret du systeme demande manuellement.")
+        print("\n[J.A.R.V.I.S] Arret du systeme demande manuellement.")
         
     if frontend_process:
-        print("[JARVIS] Arret du serveur Web...")
+        print("[J.A.R.V.I.S] Arret du serveur Web...")
         frontend_process.terminate()
 
 if __name__ == "__main__":
