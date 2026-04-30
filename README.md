@@ -183,6 +183,15 @@ Important :
 
 Cela permet a l'interface de continuer a recevoir les reponses meme quand seul le port HTTP est expose publiquement.
 
+
+## Ecoute vocale
+
+Depuis l'interface web, Jarvis peut recevoir une commande de deux facons :
+- cliquer sur le bouton micro pour dicter directement une commande ;
+- prononcer le nom configure de l'assistant, puis la commande, par exemple `Jarvis lance une musique sur YouTube`.
+
+Le nom de reveil utilise la valeur `assistant_name` reglable dans le dashboard. Pendant que Jarvis parle, l'ecoute est suspendue puis relancee automatiquement pour eviter que l'assistant se reponde a lui-meme.
+
 ## Dashboard et securite
 
 Le dashboard peut fonctionner en mode libre, mais le mode recommande est la protection via OAuth Discord.

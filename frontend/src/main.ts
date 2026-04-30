@@ -148,6 +148,12 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let httpPollTimer: ReturnType<typeof setTimeout> | null = null;
 let currentAudio: HTMLAudioElement | null = null;
 let isListening = false;
+let speechMode: "wake" | "manual" | null = null;
+let manualCapturePending = false;
+let suppressRecognitionEnd = false;
+let lastWakeRestartAt = 0;
+let currentAssistantName = "J.A.R.V.I.S";
+let finalTranscriptBuffer = "";
 let authStatus: AuthStatus | null = null;
 let dashboardOpen = false;
 let dashboardLoading = false;
@@ -270,11 +276,57 @@ function setMicListening(listening: boolean): void {
   micButtonEl.setAttribute("aria-pressed", String(listening));
   micButtonEl.setAttribute("aria-label", listening ? "Arreter l'ecoute" : "Parler a JARVIS");
   micButtonEl.title = listening ? "Arreter l'ecoute" : "Parler a JARVIS";
-  setMusicDucking(listening);
+  setMusicDucking(listening && speechMode === "manual");
+}
+
+function normalizeWakeText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function getWakeNames(): string[] {
+  const configured = currentAssistantName || "J.A.R.V.I.S";
+  const compact = configured.replace(/[.\s]+/g, "");
+  const candidates = [configured, compact, "jarvis", "j a r v i s"];
+  return [...new Set(candidates.map(normalizeWakeText).filter((name) => name.length >= 2))];
+}
+
+function extractWakeCommand(text: string): string {
+  const normalizedText = normalizeWakeText(text);
+  if (!normalizedText) return "";
+  for (const wakeName of getWakeNames()) {
+    const index = normalizedText.indexOf(wakeName);
+    if (index < 0) continue;
+    const after = normalizedText.slice(index + wakeName.length).trim();
+    return after.replace(/^(stp|s il te plait|s il vous plait|peux tu|tu peux)\s+/, "").trim();
+  }
+  return "";
+}
+
+function submitVoiceCommand(text: string): void {
+  const command = text.trim();
+  if (!command) {
+    applyState("idle");
+    return;
+  }
+  setConversation(command, "");
+  applyState("thinking");
+  if (!sendCommand(command)) {
+    applyState("idle");
+    showError("WebSocket non connecte");
+  }
 }
 
 function setAssistantName(name: string): void {
-  assistantLabelEl.textContent = name || "J.A.R.V.I.S";
+  currentAssistantName = name || "J.A.R.V.I.S";
+  assistantLabelEl.textContent = currentAssistantName;
+  micButtonEl.setAttribute("aria-label", `Parler a ${currentAssistantName}`);
+  micButtonEl.title = `Parler a ${currentAssistantName}`;
 }
 
 function setConversation(userText: string, jarvisText = ""): void {
@@ -509,15 +561,21 @@ async function handleServerMessage(data: WsMessage): Promise<void> {
     setConversation(userTextEl.textContent.replace(/^"|"$/g, ""), nettoyerTexteJarvis(data.text || ""));
     if (data.audio_b64) {
       if (currentAudio) currentAudio.pause();
+      if (recognition && isListening) {
+        suppressRecognitionEnd = true;
+        recognition.stop();
+      }
       currentAudio = new Audio(`data:audio/mp3;base64,${data.audio_b64}`);
       applyState("speaking");
       void currentAudio.play().catch(() => {
         showError("Lecture audio navigateur impossible");
         applyState("idle");
+        startWakeListening();
       });
       currentAudio.addEventListener("ended", () => {
         applyState("idle");
         currentAudio = null;
+        startWakeListening();
       }, { once: true });
     }
     return;
@@ -696,15 +754,18 @@ let recognition: BrowserSpeechRecognition | null = null;
 if (SpeechRecognitionCtor) {
   recognition = new SpeechRecognitionCtor();
   recognition.lang = "fr-FR";
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
 
   recognition.addEventListener("start", () => {
     isListening = true;
     setMicListening(true);
-    applyState("listening");
-    setConversation("");
+    finalTranscriptBuffer = "";
+    if (speechMode === "manual") {
+      applyState("listening");
+      setConversation("");
+    }
   });
 
   recognition.addEventListener("result", ((event: Event) => {
@@ -722,22 +783,52 @@ if (SpeechRecognitionCtor) {
         interim += transcript;
       }
     }
-    setConversation((finalText || interim).trim(), "");
+
+    const heard = (finalText || interim).trim();
+    if (speechMode === "manual" || manualCapturePending) {
+      setConversation(heard, "");
+    }
+
+    if (!finalText.trim()) return;
+    finalTranscriptBuffer = `${finalTranscriptBuffer} ${finalText}`.trim();
+
+    if (manualCapturePending || speechMode === "manual") {
+      const command = finalTranscriptBuffer.trim();
+      manualCapturePending = false;
+      suppressRecognitionEnd = true;
+      recognition?.stop();
+      submitVoiceCommand(command);
+      return;
+    }
+
+    const wakeCommand = extractWakeCommand(finalTranscriptBuffer);
+    if (wakeCommand) {
+      suppressRecognitionEnd = true;
+      recognition?.stop();
+      submitVoiceCommand(wakeCommand);
+      return;
+    }
+
+    if (finalTranscriptBuffer.length > 240) {
+      finalTranscriptBuffer = finalTranscriptBuffer.slice(-160);
+    }
   }) as EventListener);
 
   recognition.addEventListener("end", () => {
-    const text = userTextEl.textContent.replace(/^"|"$/g, "").trim();
     isListening = false;
     setMicListening(false);
-    if (!text) {
-      applyState("idle");
+    setMusicDucking(false);
+    if (suppressRecognitionEnd) {
+      suppressRecognitionEnd = false;
+      speechMode = "wake";
+      window.setTimeout(startWakeListening, 900);
       return;
     }
-    applyState("thinking");
-    if (!sendCommand(text)) {
+    if (speechMode === "manual") {
+      speechMode = "wake";
       applyState("idle");
-      showError("WebSocket non connecte");
     }
+    window.setTimeout(startWakeListening, 900);
   });
 
   recognition.addEventListener("error", ((event: Event) => {
@@ -745,8 +836,11 @@ if (SpeechRecognitionCtor) {
     isListening = false;
     setMicListening(false);
     applyState("idle");
-    if (speechError.error !== "no-speech") {
+    if (speechError.error !== "no-speech" && speechMode === "manual") {
       showError(`Micro navigateur: ${speechError.error || "erreur inconnue"}`);
+    }
+    if (speechMode !== "manual") {
+      window.setTimeout(startWakeListening, 1500);
     }
   }) as EventListener);
 } else {
@@ -1074,14 +1168,34 @@ muteButtonEl.addEventListener("click", () => {
   applyState("idle");
 });
 
-micButtonEl.addEventListener("click", () => {
+function startWakeListening(): void {
+  if (!recognition || isListening) return;
+  const now = Date.now();
+  if (now - lastWakeRestartAt < 700) return;
+  lastWakeRestartAt = now;
+  speechMode = "wake";
+  manualCapturePending = false;
+  finalTranscriptBuffer = "";
+  try {
+    recognition.start();
+  } catch {
+    // Chrome peut refuser un redemarrage trop rapide; le prochain cycle retentera.
+  }
+}
+
+function startManualListening(): void {
   if (!recognition) return;
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
   }
+  finalTranscriptBuffer = "";
+  manualCapturePending = true;
+  speechMode = "manual";
   if (isListening) {
-    recognition.stop();
+    applyState("listening");
+    setMusicDucking(true);
+    setConversation("");
     return;
   }
   try {
@@ -1089,6 +1203,10 @@ micButtonEl.addEventListener("click", () => {
   } catch {
     showError("Impossible de demarrer le micro");
   }
+}
+
+micButtonEl.addEventListener("click", () => {
+  startManualListening();
 });
 
 dashboardButtonEl.addEventListener("click", () => {
@@ -1194,5 +1312,6 @@ renderDebugState();
 injectVisionButton();
 scheduleHttpPolling(400);
 connect();
+startWakeListening();
 void fetchAuthStatus();
 handleUrlFeedback();
