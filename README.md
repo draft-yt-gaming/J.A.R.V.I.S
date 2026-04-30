@@ -238,7 +238,21 @@ Puis configure `OLLAMA_ENABLED=true` et `OLLAMA_MODELS=llama3.1:8b` dans le dash
 
 JARVIS peut tourner dans un container LXC Proxmox pour l'usage web/headless. C'est plus leger qu'une VM, tant que l'on ne depend pas d'un bureau Linux local, d'un micro USB branche au serveur ou d'un passthrough GPU complexe.
 
-Un assistant interactif est fourni pour etre lance **sur l'hote Proxmox**, en root :
+Un assistant interactif est fourni pour etre lance **sur l'hote Proxmox**, en root, avec une seule commande :
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/draft-yt-gaming/J.A.R.V.I.S/main/scripts/proxmox_create_lxc.sh)"
+```
+
+Variante plus prudente si tu veux lire le script avant execution :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/draft-yt-gaming/J.A.R.V.I.S/main/scripts/proxmox_create_lxc.sh -o /tmp/jarvis-proxmox-lxc.sh
+less /tmp/jarvis-proxmox-lxc.sh
+bash /tmp/jarvis-proxmox-lxc.sh
+```
+
+Si le depot est deja clone sur l'hote Proxmox, tu peux aussi lancer :
 
 ```bash
 bash scripts/proxmox_create_lxc.sh
