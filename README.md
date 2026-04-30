@@ -207,6 +207,7 @@ Le fichier runtime `jarvis_memoire.json` stocke donc plusieurs blocs utilisateur
 Depuis `frontend/` :
 
 ```bash
+npm install
 npm run dev
 npm run build
 ```
@@ -218,10 +219,15 @@ Le build genere `frontend/dist/`, servi ensuite par Flask en mode VM/headless.
 Ces fichiers ne devraient pas contenir d'informations sensibles dans le depot :
 - `.env`
 - `venv/`
+- `frontend/node_modules/`
 - `__pycache__/`
+- `*.pyc`
 - `jarvis_memoire.json`
 - `jarvis_runtime_settings.json`
+- `frontend/.vite/`
+- `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`
 - fichiers audio/image temporaires Jarvis
+- images generees dans `generated_images/`
 
 ## Limitations / remarques
 

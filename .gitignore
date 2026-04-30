@@ -7,3 +7,9 @@ jarvis_runtime_settings.json
 jarvis_tts_*.mp3
 jarvis_vision_temp.png
 .codex
+frontend/node_modules/
+frontend/.vite/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+generated_images/

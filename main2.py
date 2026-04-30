@@ -38,6 +38,7 @@ from functools import wraps
 from contextvars import ContextVar
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from flask import Flask, jsonify, redirect, request as flask_request, send_from_directory, session
+from werkzeug.middleware.proxy_fix import ProxyFix
 try:
     import cv2
 except ImportError:
@@ -564,10 +565,43 @@ def get_private_runtime_settings():
         "JARVIS_SESSION_SECRET": JARVIS_SESSION_SECRET,
     }
 
+def _request_effective_scheme():
+    forwarded_proto = str(flask_request.headers.get("X-Forwarded-Proto", "")).split(",")[0].strip()
+    return forwarded_proto or flask_request.scheme or "http"
+
+
+def _request_effective_host():
+    forwarded_host = str(flask_request.headers.get("X-Forwarded-Host", "")).split(",")[0].strip()
+    if forwarded_host:
+        return forwarded_host
+    return flask_request.host
+
+
+def _host_looks_public(hostname):
+    host = str(hostname or "").split(":")[0].strip().lower()
+    if not host:
+        return False
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return False
+    if host.startswith("192.168."):
+        return False
+    if host.startswith("10."):
+        return False
+    if re.match(r"^172\.(1[6-9]|2[0-9]|3[0-1])\.", host):
+        return False
+    return True
+
+
 def discord_redirect_uri_for_request():
+    scheme = _request_effective_scheme()
+    host = _request_effective_host()
+    request_based_uri = f"{scheme}://{host}/auth/discord/callback"
+
+    if _host_looks_public(host):
+        return request_based_uri
     if env_value_is_configured(DISCORD_REDIRECT_URI):
         return DISCORD_REDIRECT_URI
-    return flask_request.url_root.rstrip("/") + "/auth/discord/callback"
+    return request_based_uri
 
 def is_owner_authenticated():
     user = session.get("discord_user")
@@ -5576,6 +5610,7 @@ def start_http_interface_server():
             return
 
     app = Flask(__name__, static_folder=interface_dir, static_url_path="")
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.secret_key = JARVIS_SESSION_SECRET or secrets.token_hex(32)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
