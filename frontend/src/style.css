@@ -1064,6 +1064,109 @@ body.dashboard-open {
   border-color: rgba(56, 189, 248, 0.34);
 }
 
+
+@media (min-width: 721px) and (max-width: 1180px) and (pointer: coarse) {
+  html,
+  body {
+    min-height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  #connection-badge {
+    top: calc(env(safe-area-inset-top, 0px) + 18px);
+    right: 18px;
+    height: 42px;
+    background: rgba(5, 9, 15, 0.72);
+  }
+
+  #mute-button,
+  #dashboard-button {
+    top: calc(env(safe-area-inset-top, 0px) + 18px);
+    width: 48px;
+    height: 48px;
+    background: rgba(5, 9, 15, 0.7);
+  }
+
+  #mute-button {
+    left: 18px;
+  }
+
+  #dashboard-button {
+    left: 78px;
+  }
+
+  #conversation-panel {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 154px);
+    width: min(680px, calc(100vw - 48px));
+    max-height: 30dvh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #mic-button {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 58px);
+    width: 86px;
+    height: 86px;
+    background: rgba(5, 9, 15, 0.72);
+  }
+
+  #status-text {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 146px);
+  }
+
+  #assistant-label {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  }
+
+  #web-dock,
+  #music-dock {
+    width: min(380px, calc(50vw - 30px));
+    max-height: min(620px, calc(100dvh - 150px));
+    border-radius: 20px;
+    background: rgba(7, 12, 20, 0.86);
+  }
+
+  #web-dock {
+    left: 18px;
+  }
+
+  #music-dock {
+    right: 18px;
+  }
+
+  .music-dock-player {
+    min-height: 180px;
+  }
+
+  .music-dock-controls {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #dashboard-panel {
+    padding: calc(env(safe-area-inset-top, 0px) + 20px) 20px calc(env(safe-area-inset-bottom, 0px) + 20px);
+  }
+
+  #dashboard-card {
+    width: min(920px, 100%);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 40px);
+    padding: 24px;
+    border-radius: 24px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dashboard-section-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #dashboard-meta,
+  #dashboard-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 720px) {
   #conversation-panel {
     bottom: 128px;

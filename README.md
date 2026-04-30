@@ -34,7 +34,7 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - Mini-player YouTube integre dans l'interface
 - Recherche musicale via YouTube Data API si `YOUTUBE_API_KEY` est configuree, avec fallback automatique sur la recherche actuelle
 - Service systemd dedie au mode VM/headless
-- Compatibilite web app Apple/iOS avec manifest, icones, HTTPS local et interface mobile adaptee
+- Compatibilite web app Apple/iOS/iPadOS avec manifest, icones, HTTPS local et interfaces mobile/tablette adaptees
 
 ## Architecture du projet
 
@@ -243,20 +243,21 @@ Jarvis separe les APIs specialisees des fournisseurs IA. Les APIs publiques ci-d
 
 Exemples APIs publiques : `meteo demain a Paris`, `jours feries en France`, `wikipedia Nikola Tesla`, `nutriscore coca cola`, `isbn 9782070368228`, `image nasa du jour`, `coordonnees de la tour eiffel`.
 
-## Web app mobile Apple/iOS
+## Web app mobile Apple/iOS/iPadOS
 
-L'interface web peut etre ajoutee a l'ecran d'accueil d'un iPhone depuis Safari avec `Partager` puis `Sur l'ecran d'accueil`.
+L'interface web peut etre ajoutee a l'ecran d'accueil d'un iPhone ou d'un iPad depuis Safari avec `Partager` puis `Sur l'ecran d'accueil`.
 
 La version mobile inclut :
 - manifest PWA et icones Apple/Android ;
 - affichage plein ecran `standalone` ;
-- prise en charge des safe areas iPhone ;
+- prise en charge des safe areas iPhone et iPad ;
+- layout tablette iPad avec boutons tactiles plus grands, dashboard adapte et panneaux lateraux redimensionnes ;
 - boutons tactiles, panneau micro et dashboard adaptes aux petits ecrans ;
 - panneaux web et YouTube ajustes en feuilles mobiles ;
 - separation des clients web pour eviter qu'une reponse lancee sur le PC s'affiche sur le telephone ;
-- HTTPS local sur le port `8443`, necessaire pour que Safari iPhone autorise le micro.
+- HTTPS local sur le port `8443`, necessaire pour que Safari iPhone/iPad autorise le micro.
 
-Sur iPhone, utiliser `https://IP_DE_LA_VM:8443` plutot que `http://IP_DE_LA_VM:8080`. Le certificat local peut demander une validation manuelle la premiere fois.
+Sur iPhone/iPad, utiliser `https://IP_DE_LA_VM:8443` plutot que `http://IP_DE_LA_VM:8080`. Le certificat local peut demander une validation manuelle la premiere fois.
 
 ## Resultats web visuels
 

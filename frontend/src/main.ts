@@ -407,7 +407,8 @@ function nettoyerTexteJarvis(text: string): string {
 }
 
 function isAppleMobileDevice(): boolean {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
 function isLocalHttpHost(): boolean {
@@ -1311,7 +1312,7 @@ function startWakeListening(): void {
 function startManualListening(options: { preserveConversation?: boolean } = {}): void {
   if (!pageCanUseMicrophone()) return;
   if (shouldBlockMobileMicroForHttps()) {
-    showError("Sur iPhone, ouvre JARVIS en HTTPS pour autoriser le micro.");
+    showError("Sur iPhone/iPad, ouvre JARVIS en HTTPS pour autoriser le micro.");
     return;
   }
   if (!recognition) return;
