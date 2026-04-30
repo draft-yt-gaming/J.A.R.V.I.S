@@ -828,7 +828,7 @@ if (SpeechRecognitionCtor) {
 
   recognition.addEventListener("start", () => {
     isListening = true;
-    setMicListening(true);
+    setMicListening(speechMode === "manual");
     finalTranscriptBuffer = "";
     if (speechMode === "manual") {
       applyState("listening");
@@ -1259,6 +1259,7 @@ function startManualListening(): void {
   speechMode = "manual";
   if (isListening) {
     applyState("listening");
+    setMicListening(true);
     setMusicDucking(true);
     setConversation("");
     return;
