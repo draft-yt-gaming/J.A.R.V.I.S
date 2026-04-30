@@ -183,6 +183,7 @@ DEFAULT_SETTINGS = {
     "DISCORD_CLIENT_SECRET": os.getenv("DISCORD_CLIENT_SECRET", ""),
     "DISCORD_REDIRECT_URI": os.getenv("DISCORD_REDIRECT_URI", ""),
     "JARVIS_SESSION_SECRET": os.getenv("JARVIS_SESSION_SECRET", ""),
+    "EXTENSION_ACCESS_TOKEN": os.getenv("EXTENSION_ACCESS_TOKEN", ""),
 }
 
 SETTINGS_FIELDS = list(DEFAULT_SETTINGS.keys())
@@ -199,6 +200,7 @@ SENSITIVE_SETTINGS = {
     "PROXMOX_TOKEN_SECRET",
     "DISCORD_CLIENT_SECRET",
     "JARVIS_SESSION_SECRET",
+    "EXTENSION_ACCESS_TOKEN",
 }
 
 def load_runtime_settings():
@@ -263,6 +265,7 @@ DISCORD_CLIENT_SECRET = ""
 DISCORD_REDIRECT_URI = ""
 ASSISTANT_NAME = "J.A.R.V.I.S"
 JARVIS_SESSION_SECRET = ""
+EXTENSION_ACCESS_TOKEN = ""
 PROXMOX_VERIFY_SSL = False
 GEMINI_CONFIGURED = False
 BLAGUES_CONFIGURED = False
@@ -290,7 +293,7 @@ def refresh_runtime_config():
     global EMBY_URL, EMBY_API_KEY, EMBY_USER_ID, EMBY_USERNAME
     global PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_VERIFY_SSL
     global DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI
-    global JARVIS_SESSION_SECRET
+    global JARVIS_SESSION_SECRET, EXTENSION_ACCESS_TOKEN
     global GEMINI_CONFIGURED, BLAGUES_CONFIGURED, YOUTUBE_CONFIGURED, XAI_CONFIGURED, HA_CONFIGURED
     global SERPAPI_CONFIGURED, GROQ_CONFIGURED, NASA_CONFIGURED, OLLAMA_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
     global client, GEMINI_CLIENTS, blagues_client, grok_client, groq_client, HA_HEADERS
@@ -325,6 +328,7 @@ def refresh_runtime_config():
     DISCORD_CLIENT_SECRET = str(settings.get("DISCORD_CLIENT_SECRET", "")).strip()
     DISCORD_REDIRECT_URI = str(settings.get("DISCORD_REDIRECT_URI", "")).strip()
     JARVIS_SESSION_SECRET = str(settings.get("JARVIS_SESSION_SECRET", "")).strip()
+    EXTENSION_ACCESS_TOKEN = str(settings.get("EXTENSION_ACCESS_TOKEN", "")).strip()
 
     if not PROXMOX_VERIFY_SSL:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -632,6 +636,7 @@ def get_private_runtime_settings():
         "DISCORD_CLIENT_SECRET": DISCORD_CLIENT_SECRET,
         "DISCORD_REDIRECT_URI": DISCORD_REDIRECT_URI,
         "JARVIS_SESSION_SECRET": JARVIS_SESSION_SECRET,
+        "EXTENSION_ACCESS_TOKEN": EXTENSION_ACCESS_TOKEN,
     }
 
 def _request_effective_scheme():
@@ -695,6 +700,14 @@ def owner_auth_required():
             return func(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def extension_request_authorized():
+    if request_from_private_network() or is_owner_authenticated():
+        return True
+    configured_token = str(EXTENSION_ACCESS_TOKEN or "").strip()
+    provided_token = str(flask_request.headers.get("X-Jarvis-Extension-Token", "")).strip()
+    return bool(configured_token and provided_token and secrets.compare_digest(configured_token, provided_token))
 
 
 def build_command_context(auth_user=None, client_id=""):
@@ -6428,8 +6441,8 @@ def start_http_interface_server():
 
     @app.post("/api/extension/tts")
     def api_extension_tts():
-        if not request_from_private_network() and not is_owner_authenticated():
-            return jsonify({"error": "extension_access_denied"}), 403
+        if not extension_request_authorized():
+            return jsonify({"error": "extension_access_denied", "detail": "Token extension requis hors reseau local."}), 403
 
         payload = flask_request.get_json(silent=True) or {}
         text_to_speak = str(payload.get("text", "")).strip()
@@ -6465,8 +6478,8 @@ def start_http_interface_server():
 
     @app.post("/api/extension/summarize")
     def api_extension_summarize():
-        if not request_from_private_network() and not is_owner_authenticated():
-            return jsonify({"error": "extension_access_denied"}), 403
+        if not extension_request_authorized():
+            return jsonify({"error": "extension_access_denied", "detail": "Token extension requis hors reseau local."}), 403
 
         payload = flask_request.get_json(silent=True) or {}
         page_title = str(payload.get("title", "")).strip()[:300]

@@ -120,6 +120,7 @@ DISCORD_CLIENT_SECRET=VOTRE_CLIENT_SECRET
 DISCORD_REDIRECT_URI=http://IP_OU_DOMAINE:8080/auth/discord/callback
 
 JARVIS_SESSION_SECRET=UN_SECRET_LONG_ET_ALEATOIRE
+EXTENSION_ACCESS_TOKEN=UN_TOKEN_POUR_EXTENSION_PUBLIQUE
 ```
 
 Notes :
@@ -226,6 +227,7 @@ Jarvis separe les APIs specialisees des fournisseurs IA. Les APIs publiques ci-d
 | Ollama | Modeles IA locaux, fallback offline ou priorite locale | Non | `OLLAMA_ENABLED`, `OLLAMA_URL`, `OLLAMA_MODELS`, `OLLAMA_PREFER_LOCAL` |
 | YouTube Data API | Recherche musicale officielle pour le mini-player | Optionnel | `YOUTUBE_API_KEY` ; fallback scraping si absent ou invalide |
 | SerpAPI | Recherche web visuelle avec liens/images | Oui | `SERPAPI_API_KEY` |
+| Extension Chrome publique | Resume de page et voix Jarvis hors reseau local | Optionnel | `EXTENSION_ACCESS_TOKEN` ; requis seulement si l'extension passe par un domaine public sans session proprietaire |
 | NASA APOD | Image astronomique du jour | Optionnel | `NASA_API_KEY` ; `DEMO_KEY` sinon |
 | Open-Meteo | Meteo, temperature, pluie, vent | Non | Aucune cle |
 | Open Food Facts | Produit, code-barres, Nutri-Score, allergenes | Non | Aucune cle |
@@ -318,7 +320,11 @@ Installation locale :
 4. Selectionner le dossier chrome-extension/ du projet
 ```
 
-Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup. Apres generation du resume, les boutons de lecture permettent d'ecouter, mettre en pause/reprendre ou arreter un MP3 genere par la VM avec la meme voix Edge TTS que Jarvis (`fr-FR-HenriNeural`). Le bouton `Copier selection` copie dans le presse-papiers le texte selectionne dans l'onglet actif.
+Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup. Une adresse sans protocole est normalisee automatiquement : `jarvis.drafthome.fr` devient `https://jarvis.drafthome.fr`, tandis que les IP locales restent en HTTP sauf ports HTTPS (`443` ou `8443`).
+
+Si l'extension est utilisee hors reseau local avec un domaine public, renseigner le meme token dans le dashboard (`EXTENSION_ACCESS_TOKEN`) et dans le champ `Token public` de l'extension. Sans token, les endpoints extension restent accessibles depuis le reseau local ou une session proprietaire authentifiee, mais pas ouverts publiquement.
+
+Apres generation du resume, les boutons de lecture permettent d'ecouter, mettre en pause/reprendre ou arreter un MP3 genere par la VM avec la meme voix Edge TTS que Jarvis (`fr-FR-HenriNeural`). Le bouton `Copier selection` copie dans le presse-papiers le texte selectionne dans l'onglet actif.
 
 ## Fichiers runtime a ne pas versionner
 

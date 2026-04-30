@@ -86,6 +86,7 @@ const DASHBOARD_FIELDS: DashboardField[] = [
   { key: "OLLAMA_URL", label: "Ollama URL", type: "url", section: "IA", placeholder: "http://127.0.0.1:11434" },
   { key: "OLLAMA_MODELS", label: "Modeles Ollama", type: "text", section: "IA", placeholder: "llama3.1:8b,mistral" },
   { key: "YOUTUBE_API_KEY", label: "YouTube API Key", type: "password", section: "Services" },
+  { key: "EXTENSION_ACCESS_TOKEN", label: "Token extension Chrome", type: "password", section: "Services", placeholder: "Optionnel, requis hors reseau local" },
   { key: "EMBY_URL", label: "Emby URL", type: "url", section: "Media", placeholder: "http://192.168.x.x:8096" },
   { key: "EMBY_API_KEY", label: "Emby API Key", type: "password", section: "Media" },
   { key: "EMBY_USER_ID", label: "Emby User ID", type: "text", section: "Media" },
