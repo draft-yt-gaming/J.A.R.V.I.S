@@ -13,3 +13,5 @@ frontend/.vite/
 .mypy_cache/
 .ruff_cache/
 generated_images/
+
+.certs/

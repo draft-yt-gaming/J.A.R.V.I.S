@@ -225,6 +225,7 @@ LOCAL_IP = get_local_ip()
 SERVER_HOST = os.getenv("JARVIS_BIND_HOST", "0.0.0.0")
 WS_PORT = int(os.getenv("JARVIS_WS_PORT", "8765"))
 HTTP_PORT = int(os.getenv("JARVIS_HTTP_PORT", "8080"))
+HTTPS_PORT = int(os.getenv("JARVIS_HTTPS_PORT", "0") or "0")
 JARVIS_HEADLESS = env_flag("JARVIS_HEADLESS", False)
 GEMINI_API_KEY = ""
 GEMINI_API_KEYS = []
@@ -1174,9 +1175,48 @@ def construire_contexte_memoire():
 # WEBSOCKET
 # ==========================================
 CONNECTED_CLIENTS = set()
+CLIENT_WEBSOCKETS = {}
+WEBSOCKET_CLIENT_IDS = {}
 interface_deja_connectee = False
 _skip_pc_audio = False  # True quand la commande vient du mobile (le tél gère son propre TTS)
 PENDING_SCREEN_CAPTURES = {}
+
+def register_websocket_client(websocket, client_id):
+    client_id = str(client_id or "").strip()
+    if not client_id:
+        return
+    previous_ids = WEBSOCKET_CLIENT_IDS.setdefault(websocket, set())
+    if client_id in previous_ids:
+        return
+    previous_ids.add(client_id)
+    CLIENT_WEBSOCKETS.setdefault(client_id, set()).add(websocket)
+    print(f"[WEB] Client associe : {client_id[:8]} ({len(CLIENT_WEBSOCKETS.get(client_id, []))} socket)")
+
+
+def unregister_websocket_client(websocket):
+    for client_id in WEBSOCKET_CLIENT_IDS.pop(websocket, set()):
+        sockets = CLIENT_WEBSOCKETS.get(client_id)
+        if not sockets:
+            continue
+        sockets.discard(websocket)
+        if not sockets:
+            CLIENT_WEBSOCKETS.pop(client_id, None)
+
+
+def get_target_websockets(client_id=""):
+    client_id = str(client_id or "").strip()
+    if client_id:
+        return set(CLIENT_WEBSOCKETS.get(client_id, set()))
+    return set(CONNECTED_CLIENTS)
+
+
+async def send_ws_payload(payload, client_id=""):
+    sockets = get_target_websockets(client_id)
+    if not sockets:
+        return
+    message = json.dumps(payload)
+    await asyncio.gather(*[ws.send(message) for ws in sockets], return_exceptions=True)
+
 
 async def ws_handler(websocket):
     global interface_deja_connectee
@@ -1187,12 +1227,16 @@ async def ws_handler(websocket):
         async for message in websocket:
             try:
                 data = json.loads(message)
-                if data.get("type") == "mobile_command":
+                if data.get("type") == "client_hello":
+                    register_websocket_client(websocket, data.get("client_id", ""))
+                elif data.get("type") == "mobile_command":
                     texte = data.get("text", "").strip()
+                    client_id = str(data.get("client_id", "")).strip()
+                    register_websocket_client(websocket, client_id)
                     auth_user = read_ws_auth_token(data.get("auth_token", ""))
                     if texte:
                         print(f"[MOBILE] Commande recue : {texte}")
-                        asyncio.ensure_future(traiter_reponse_ia(texte, mobile_ws=websocket, auth_user=auth_user, http_client_id=data.get("client_id", "")))
+                        asyncio.ensure_future(traiter_reponse_ia(texte, mobile_ws=websocket, auth_user=auth_user, http_client_id=client_id))
                 elif data.get("type") == "stop_audio":
                     global STOP_PARLER
                     STOP_PARLER = True
@@ -1211,6 +1255,7 @@ async def ws_handler(websocket):
     except Exception:
         pass
     finally:
+        unregister_websocket_client(websocket)
         CONNECTED_CLIENTS.discard(websocket)
         print(f"[WEB] Interface deconnectee (Clients actifs: {len(CONNECTED_CLIENTS)})")
 
@@ -1230,28 +1275,25 @@ def pop_http_client_events(client_id):
 
 async def send_web_state(state):
     client_id = COMMAND_HTTP_CLIENT_ID.get()
+    payload = {"action": "set_state", "state": state}
     if client_id:
-        queue_http_client_event(client_id, {"action": "set_state", "state": state})
-    if CONNECTED_CLIENTS:
-        message = json.dumps({"action": "set_state", "state": state})
-        await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
+        queue_http_client_event(client_id, payload)
+    await send_ws_payload(payload, client_id)
 
 async def send_web_volume(volume):
     client_id = COMMAND_HTTP_CLIENT_ID.get()
     rounded = round(volume, 3)
+    payload = {"action": "set_volume", "volume": rounded}
     if client_id:
-        queue_http_client_event(client_id, {"action": "set_volume", "volume": rounded})
-    if CONNECTED_CLIENTS:
-        message = json.dumps({"action": "set_volume", "volume": rounded})
-        await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
+        queue_http_client_event(client_id, payload)
+    await send_ws_payload(payload, client_id)
 
 async def send_web_action(action, **payload):
     client_id = COMMAND_HTTP_CLIENT_ID.get()
+    full_payload = {"action": action, **payload}
     if client_id:
-        queue_http_client_event(client_id, {"action": action, **payload})
-    if CONNECTED_CLIENTS:
-        message = json.dumps({"action": action, **payload})
-        await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
+        queue_http_client_event(client_id, full_payload)
+    await send_ws_payload(full_payload, client_id)
 
 async def request_screen_capture():
     """Demande une capture d'écran au frontend via WebSocket."""
@@ -3964,19 +4006,17 @@ async def parler(texte):
         should_stream_audio = _skip_pc_audio or JARVIS_HEADLESS
 
         if should_stream_audio:
-            print(f"[MOBILE] Envoi audio au mobile : {texte_tts}")
-            if CONNECTED_CLIENTS:
-                try:
-                    with open(tmp, "rb") as f:
-                        audio_b64 = base64.b64encode(f.read()).decode('utf-8')
-                    message = json.dumps({"action": "jarvis_audio", "text": texte_tts, "audio_b64": audio_b64})
-                    client_id = COMMAND_HTTP_CLIENT_ID.get()
-                    if client_id:
-                        queue_http_client_event(client_id, {"action": "jarvis_audio", "text": texte_tts, "audio_b64": audio_b64})
-                    if CONNECTED_CLIENTS:
-                        await asyncio.gather(*[ws.send(message) for ws in CONNECTED_CLIENTS], return_exceptions=True)
-                except Exception as e:
-                    print(f"[MOBILE] Erreur envoi audio : {e}")
+            print(f"[MOBILE] Envoi audio au client web : {texte_tts}")
+            try:
+                with open(tmp, "rb") as f:
+                    audio_b64 = base64.b64encode(f.read()).decode('utf-8')
+                client_id = COMMAND_HTTP_CLIENT_ID.get()
+                payload = {"action": "jarvis_audio", "text": texte_tts, "audio_b64": audio_b64}
+                if client_id:
+                    queue_http_client_event(client_id, payload)
+                await send_ws_payload(payload, client_id)
+            except Exception as e:
+                print(f"[MOBILE] Erreur envoi audio : {e}")
             # Ne joue pas l'audio sur le PC
         else:
             init_mixer()
@@ -5872,6 +5912,52 @@ if not JARVIS_HEADLESS:
     except Exception as e:
         print(f"[AUDIO] Initialisation audio locale impossible : {e}")
 
+def ensure_local_https_certificate(base_dir):
+    cert_dir = os.path.join(base_dir, ".certs")
+    cert_path = os.path.join(cert_dir, "jarvis-local.crt")
+    key_path = os.path.join(cert_dir, "jarvis-local.key")
+    if os.path.exists(cert_path) and os.path.exists(key_path):
+        return cert_path, key_path
+
+    os.makedirs(cert_dir, exist_ok=True)
+    openssl_conf = os.path.join(cert_dir, "openssl.cnf")
+    san_entries = [
+        "DNS:localhost",
+        f"DNS:{LOCAL_IP}",
+        "IP:127.0.0.1",
+    ]
+    try:
+        ipaddress.ip_address(LOCAL_IP)
+        san_entries.append(f"IP:{LOCAL_IP}")
+    except ValueError:
+        pass
+
+    with open(openssl_conf, "w", encoding="utf-8") as f:
+        f.write("""[req]
+distinguished_name=req_distinguished_name
+x509_extensions=v3_req
+prompt=no
+[req_distinguished_name]
+CN=JARVIS Local
+[v3_req]
+subjectAltName={san}
+""".format(san=",".join(san_entries)))
+
+    subprocess.run(
+        [
+            "openssl", "req", "-x509", "-nodes", "-days", "825", "-newkey", "rsa:2048",
+            "-keyout", key_path,
+            "-out", cert_path,
+            "-config", openssl_conf,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print(f"[WEB] Certificat HTTPS local genere : {cert_path}")
+    return cert_path, key_path
+
+
 def start_http_interface_server():
     """Serveur HTTP Flask pour l'interface web et le dashboard sécurisé."""
     global app
@@ -6140,6 +6226,23 @@ def start_http_interface_server():
         return send_from_directory(interface_dir, "index.html")
 
     label = "WEB" if JARVIS_HEADLESS else "MOBILE"
+    if HTTPS_PORT:
+        try:
+            cert_path, key_path = ensure_local_https_certificate(base_dir)
+            threading.Thread(
+                target=lambda: app.run(
+                    host=SERVER_HOST,
+                    port=HTTPS_PORT,
+                    debug=False,
+                    use_reloader=False,
+                    threaded=True,
+                    ssl_context=(cert_path, key_path),
+                ),
+                daemon=True,
+            ).start()
+            print(f"[{label}] Serveur HTTPS demarre sur https://{LOCAL_IP}:{HTTPS_PORT}")
+        except Exception as e:
+            print(f"[{label}] HTTPS indisponible : {e}")
     print(f"[{label}] Serveur HTTP demarre sur http://{LOCAL_IP}:{HTTP_PORT}")
     app.run(host=SERVER_HOST, port=HTTP_PORT, debug=False, use_reloader=False, threaded=True)
 
@@ -6169,6 +6272,8 @@ def main():
     if JARVIS_HEADLESS:
         print("  Frontend  : page web actuelle")
         print(f"  Interface : ouvrir http://{LOCAL_IP}:{HTTP_PORT}")
+        if HTTPS_PORT:
+            print(f"  iPhone    : ouvrir https://{LOCAL_IP}:{HTTPS_PORT}")
     else:
         print("  Frontend  : ouvrir http://localhost:5173")
         print(f"  Mobile    : ouvrir http://{LOCAL_IP}:{HTTP_PORT} sur votre tel/tablette")
@@ -6185,6 +6290,8 @@ def main():
     # Libérer les ports si une instance précédente tourne encore
     liberer_port(WS_PORT)
     liberer_port(HTTP_PORT)
+    if HTTPS_PORT:
+        liberer_port(HTTPS_PORT)
 
     # Lancer le serveur Frontend
     frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")

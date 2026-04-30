@@ -398,6 +398,18 @@ function nettoyerTexteJarvis(text: string): string {
   return text.replace(/\{[^}]*\}/gs, "").replace(/\s{2,}/g, " ").trim();
 }
 
+function isAppleMobileDevice(): boolean {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
+function isLocalHttpHost(): boolean {
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
+function shouldBlockMobileMicroForHttps(): boolean {
+  return isAppleMobileDevice() && !window.isSecureContext && !isLocalHttpHost();
+}
+
 function shouldListenForUserReply(text: string): boolean {
   const normalized = nettoyerTexteJarvis(text).toLowerCase().trim();
   if (!normalized) return false;
@@ -781,6 +793,10 @@ function connect(): void {
   ws.addEventListener("open", () => {
     stopHttpPolling();
     setConnected(true);
+    ws?.send(JSON.stringify({
+      type: "client_hello",
+      client_id: getClientId(),
+    }));
   });
 
   ws.addEventListener("message", async (event: MessageEvent) => {
@@ -1276,6 +1292,10 @@ function startWakeListening(): void {
 }
 
 function startManualListening(options: { preserveConversation?: boolean } = {}): void {
+  if (shouldBlockMobileMicroForHttps()) {
+    showError("Sur iPhone, ouvre JARVIS en HTTPS pour autoriser le micro.");
+    return;
+  }
   if (!recognition) return;
   if (currentAudio) {
     currentAudio.pause();

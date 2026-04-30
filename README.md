@@ -33,7 +33,7 @@ Le backend gere les appels IA, la memoire, les integrations externes et les acti
 - Mini-player YouTube integre dans l'interface
 - Recherche musicale via YouTube Data API si `YOUTUBE_API_KEY` est configuree, avec fallback automatique sur la recherche actuelle
 - Service systemd dedie au mode VM/headless
-- Compatibilite web app Apple/iOS avec manifest, icones et interface mobile adaptee
+- Compatibilite web app Apple/iOS avec manifest, icones, HTTPS local et interface mobile adaptee
 
 ## Architecture du projet
 
@@ -197,7 +197,11 @@ La version mobile inclut :
 - affichage plein ecran `standalone` ;
 - prise en charge des safe areas iPhone ;
 - boutons tactiles, panneau micro et dashboard adaptes aux petits ecrans ;
-- panneaux web et YouTube ajustes en feuilles mobiles.
+- panneaux web et YouTube ajustes en feuilles mobiles ;
+- separation des clients web pour eviter qu'une reponse lancee sur le PC s'affiche sur le telephone ;
+- HTTPS local sur le port `8443`, necessaire pour que Safari iPhone autorise le micro.
+
+Sur iPhone, utiliser `https://IP_DE_LA_VM:8443` plutot que `http://IP_DE_LA_VM:8080`. Le certificat local peut demander une validation manuelle la premiere fois.
 
 ## Resultats web visuels
 
