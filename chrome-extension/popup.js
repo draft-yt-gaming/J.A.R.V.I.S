@@ -12,7 +12,8 @@ const speechStatus = document.getElementById("speech-status");
 
 let currentTab = null;
 let latestSummary = "";
-let speechPaused = false;
+let summaryAudio = null;
+let summaryAudioUrl = "";
 
 function setResult(message) {
   result.textContent = message;
@@ -26,72 +27,89 @@ function normalizeServerUrl(value) {
   return (value || DEFAULT_SERVER_URL).trim().replace(/\/+$/, "");
 }
 
-function getFrenchVoice() {
-  const voices = window.speechSynthesis?.getVoices?.() || [];
-  return voices.find((voice) => voice.lang?.toLowerCase().startsWith("fr")) || voices[0] || null;
+function revokeSummaryAudio() {
+  if (summaryAudio) {
+    summaryAudio.pause();
+    summaryAudio.src = "";
+    summaryAudio = null;
+  }
+  if (summaryAudioUrl) {
+    URL.revokeObjectURL(summaryAudioUrl);
+    summaryAudioUrl = "";
+  }
+}
+
+function resetSpeechControls(message = "Lecture vocale prete apres resume") {
+  pauseButton.textContent = "⏯";
+  speakButton.disabled = !latestSummary.trim();
+  pauseButton.disabled = true;
+  stopButton.disabled = true;
+  setSpeechStatus(message);
 }
 
 function stopSpeech() {
-  if (!window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  speechPaused = false;
-  pauseButton.textContent = "⏯";
-  pauseButton.disabled = true;
-  stopButton.disabled = true;
-  if (latestSummary) setSpeechStatus("Lecture arretee");
+  if (summaryAudio) {
+    summaryAudio.pause();
+    summaryAudio.currentTime = 0;
+  }
+  resetSpeechControls(latestSummary ? "Lecture arretee" : "Lecture vocale prete apres resume");
 }
 
-function speakSummary() {
-  if (!latestSummary.trim()) {
-    setSpeechStatus("Aucun resume a lire");
-    return;
-  }
-  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
-    setSpeechStatus("Lecture vocale indisponible dans ce navigateur");
-    return;
+async function ensureSummaryAudio() {
+  if (summaryAudio) return summaryAudio;
+  if (!latestSummary.trim()) throw new Error("Aucun resume a lire.");
+
+  setSpeechStatus("Creation de la voix Jarvis...");
+  const response = await fetch(`${normalizeServerUrl(serverInput.value)}/api/extension/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: latestSummary }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || payload.error || `Erreur HTTP ${response.status}`);
   }
 
-  stopSpeech();
-  const utterance = new SpeechSynthesisUtterance(latestSummary);
-  const voice = getFrenchVoice();
-  if (voice) utterance.voice = voice;
-  utterance.lang = voice?.lang || "fr-FR";
-  utterance.rate = 1;
-  utterance.pitch = 1;
-  utterance.onstart = () => {
-    speechPaused = false;
+  const audioBlob = await response.blob();
+  summaryAudioUrl = URL.createObjectURL(audioBlob);
+  summaryAudio = new Audio(summaryAudioUrl);
+  summaryAudio.addEventListener("play", () => {
+    pauseButton.textContent = "⏯";
     pauseButton.disabled = false;
     stopButton.disabled = false;
-    setSpeechStatus("Lecture en cours");
-  };
-  utterance.onend = () => {
-    speechPaused = false;
-    pauseButton.textContent = "⏯";
-    pauseButton.disabled = true;
-    stopButton.disabled = true;
-    setSpeechStatus("Lecture terminee");
-  };
-  utterance.onerror = () => {
-    speechPaused = false;
-    pauseButton.disabled = true;
-    stopButton.disabled = true;
-    setSpeechStatus("Erreur de lecture vocale");
-  };
-  window.speechSynthesis.speak(utterance);
+    setSpeechStatus("Voix Jarvis en cours");
+  });
+  summaryAudio.addEventListener("pause", () => {
+    if (summaryAudio && summaryAudio.currentTime > 0 && summaryAudio.currentTime < summaryAudio.duration) {
+      pauseButton.textContent = "▶";
+      setSpeechStatus("Lecture en pause");
+    }
+  });
+  summaryAudio.addEventListener("ended", () => {
+    resetSpeechControls("Lecture terminee");
+  });
+  summaryAudio.addEventListener("error", () => {
+    resetSpeechControls("Erreur audio Jarvis");
+  });
+  return summaryAudio;
+}
+
+async function speakSummary() {
+  try {
+    const audio = await ensureSummaryAudio();
+    audio.currentTime = 0;
+    await audio.play();
+  } catch (error) {
+    setSpeechStatus(`Erreur: ${error.message}`);
+  }
 }
 
 function toggleSpeechPause() {
-  if (!window.speechSynthesis?.speaking) return;
-  if (speechPaused) {
-    window.speechSynthesis.resume();
-    speechPaused = false;
-    pauseButton.textContent = "⏯";
-    setSpeechStatus("Lecture en cours");
+  if (!summaryAudio) return;
+  if (summaryAudio.paused) {
+    void summaryAudio.play();
   } else {
-    window.speechSynthesis.pause();
-    speechPaused = true;
-    pauseButton.textContent = "▶";
-    setSpeechStatus("Lecture en pause");
+    summaryAudio.pause();
   }
 }
 
@@ -124,7 +142,7 @@ async function extractPage() {
 async function summarizePage() {
   button.disabled = true;
   speakButton.disabled = true;
-  stopSpeech();
+  revokeSummaryAudio();
   latestSummary = "";
   setResult("Lecture de la page...");
   setSpeechStatus("Resume en preparation");
@@ -145,7 +163,7 @@ async function summarizePage() {
     latestSummary = `${payload.summary || "Aucun resume recu."}${suffix}`;
     setResult(latestSummary);
     speakButton.disabled = !latestSummary.trim();
-    setSpeechStatus("Pret a lire le resume");
+    resetSpeechControls("Pret a lire avec la voix Jarvis");
   } catch (error) {
     setResult(`Erreur: ${error.message}`);
     setSpeechStatus("Lecture vocale indisponible");
@@ -159,7 +177,6 @@ button.addEventListener("click", summarizePage);
 speakButton.addEventListener("click", speakSummary);
 pauseButton.addEventListener("click", toggleSpeechPause);
 stopButton.addEventListener("click", stopSpeech);
-window.speechSynthesis?.addEventListener?.("voiceschanged", getFrenchVoice);
 
 void loadSettings();
 void loadCurrentTab();

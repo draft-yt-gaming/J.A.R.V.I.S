@@ -38,7 +38,7 @@ import secrets
 from functools import wraps
 from contextvars import ContextVar
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from flask import Flask, jsonify, redirect, request as flask_request, send_from_directory, session
+from flask import Flask, Response, jsonify, redirect, request as flask_request, send_from_directory, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 try:
     import cv2
@@ -68,6 +68,7 @@ from googleapiclient.discovery import build
 # Chargement des variables d'environnement
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
+JARVIS_TTS_VOICE = "fr-FR-HenriNeural"
 SETTINGS_FILE = BASE_DIR / "jarvis_runtime_settings.json"
 GENERATED_IMAGES_DIR = BASE_DIR / "generated_images"
 DEBUG_LOG_BUFFER = deque(maxlen=600)
@@ -3789,7 +3790,7 @@ async def parler(texte):
     tmp = f"jarvis_tts_{int(time.time()*1000)}.mp3"
     
     try:
-        communicate = edge_tts.Communicate(texte_tts, voice="fr-FR-HenriNeural")
+        communicate = edge_tts.Communicate(texte_tts, voice=JARVIS_TTS_VOICE)
         await communicate.save(tmp)
         
         should_stream_audio = _skip_pc_audio or JARVIS_HEADLESS
@@ -5671,6 +5672,43 @@ def start_http_interface_server():
             daemon=True,
         ).start()
         return jsonify({"ok": True})
+
+    @app.post("/api/extension/tts")
+    def api_extension_tts():
+        if not request_from_private_network() and not is_owner_authenticated():
+            return jsonify({"error": "extension_access_denied"}), 403
+
+        payload = flask_request.get_json(silent=True) or {}
+        text_to_speak = str(payload.get("text", "")).strip()
+        if not text_to_speak:
+            return jsonify({"error": "empty_text"}), 400
+
+        max_chars = 12000
+        text_to_speak = text_to_speak[:max_chars]
+        text_to_speak = text_to_speak.replace("**", "").replace("*", "").replace("#", "").replace("`", "").strip()
+        output_file = BASE_DIR / f"jarvis_tts_extension_{int(time.time() * 1000)}_{secrets.token_hex(4)}.mp3"
+        try:
+            communicate = edge_tts.Communicate(text_to_speak, voice=JARVIS_TTS_VOICE)
+            asyncio.run(communicate.save(str(output_file)))
+            audio_bytes = output_file.read_bytes()
+        except Exception as e:
+            print(f"[EXTENSION] Erreur TTS : {e}")
+            return jsonify({"error": "tts_failed", "detail": str(e)}), 500
+        finally:
+            try:
+                if output_file.exists():
+                    output_file.unlink()
+            except Exception:
+                pass
+
+        return Response(
+            audio_bytes,
+            mimetype="audio/mpeg",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Jarvis-TTS-Voice": JARVIS_TTS_VOICE,
+            },
+        )
 
     @app.post("/api/extension/summarize")
     def api_extension_summarize():
