@@ -198,7 +198,7 @@ Les demandes de type `donne moi une recette de pate` sont converties en recherch
 
 Depuis l'interface web, Jarvis peut recevoir une commande de deux facons :
 - cliquer sur le bouton micro pour dicter directement une commande ;
-- prononcer le nom configure de l'assistant, puis la commande, par exemple `Jarvis lance une musique sur YouTube`.
+- prononcer le nom configure de l'assistant pour activer le micro, puis dicter la commande comme apres un clic.
 
 Le nom de reveil utilise la valeur `assistant_name` reglable dans le dashboard. Pendant que Jarvis parle, l'ecoute est suspendue puis relancee automatiquement pour eviter que l'assistant se reponde a lui-meme.
 

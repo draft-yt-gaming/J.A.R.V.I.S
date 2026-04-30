@@ -361,16 +361,10 @@ function getWakeNames(): string[] {
   return [...new Set(candidates.map(normalizeWakeText).filter((name) => name.length >= 2))];
 }
 
-function extractWakeCommand(text: string): string {
+function heardWakeName(text: string): boolean {
   const normalizedText = normalizeWakeText(text);
-  if (!normalizedText) return "";
-  for (const wakeName of getWakeNames()) {
-    const index = normalizedText.indexOf(wakeName);
-    if (index < 0) continue;
-    const after = normalizedText.slice(index + wakeName.length).trim();
-    return after.replace(/^(stp|s il te plait|s il vous plait|peux tu|tu peux)\s+/, "").trim();
-  }
-  return "";
+  if (!normalizedText) return false;
+  return getWakeNames().some((wakeName) => normalizedText.includes(wakeName));
 }
 
 function submitVoiceCommand(text: string): void {
@@ -875,11 +869,10 @@ if (SpeechRecognitionCtor) {
       return;
     }
 
-    const wakeCommand = extractWakeCommand(finalTranscriptBuffer);
-    if (wakeCommand) {
+    if (heardWakeName(finalTranscriptBuffer)) {
       suppressRecognitionEnd = true;
       recognition?.stop();
-      submitVoiceCommand(wakeCommand);
+      window.setTimeout(startManualListening, 350);
       return;
     }
 
@@ -894,8 +887,6 @@ if (SpeechRecognitionCtor) {
     setMusicDucking(false);
     if (suppressRecognitionEnd) {
       suppressRecognitionEnd = false;
-      speechMode = "wake";
-      window.setTimeout(startWakeListening, 900);
       return;
     }
     if (speechMode === "manual") {
