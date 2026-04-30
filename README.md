@@ -228,7 +228,7 @@ Installation locale :
 4. Selectionner le dossier chrome-extension/ du projet
 ```
 
-Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup.
+Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup. Apres generation du resume, les boutons de lecture permettent d'ecouter, mettre en pause/reprendre ou arreter la synthese vocale du navigateur.
 
 ## Fichiers runtime a ne pas versionner
 
