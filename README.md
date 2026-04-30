@@ -228,7 +228,7 @@ Installation locale :
 4. Selectionner le dossier chrome-extension/ du projet
 ```
 
-Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup. Apres generation du resume, les boutons de lecture permettent d'ecouter, mettre en pause/reprendre ou arreter un MP3 genere par la VM avec la meme voix Edge TTS que Jarvis (`fr-FR-HenriNeural`).
+Par defaut, l'extension appelle `http://192.168.2.102:8080`. L'URL du serveur est modifiable directement dans le popup. Apres generation du resume, les boutons de lecture permettent d'ecouter, mettre en pause/reprendre ou arreter un MP3 genere par la VM avec la meme voix Edge TTS que Jarvis (`fr-FR-HenriNeural`). Le bouton `Copier selection` copie dans le presse-papiers le texte selectionne dans l'onglet actif.
 
 ## Fichiers runtime a ne pas versionner
 

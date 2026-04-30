@@ -81,6 +81,7 @@ input:focus {
 }
 
 .page-meta,
+.selection-controls,
 .listen-controls {
   border: 1px solid #263345;
   border-radius: 7px;
@@ -104,6 +105,29 @@ input:focus {
   overflow-wrap: anywhere;
   color: #9fb0c4;
   font-size: 11px;
+}
+
+
+.selection-controls {
+  display: grid;
+  grid-template-columns: 146px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+}
+
+.selection-controls button {
+  width: 146px;
+  min-width: 146px;
+}
+
+#selection-status {
+  overflow: hidden;
+  color: #b6c4d6;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .listen-controls {

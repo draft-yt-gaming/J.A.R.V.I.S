@@ -9,6 +9,8 @@ const speakButton = document.getElementById("speak-button");
 const pauseButton = document.getElementById("pause-button");
 const stopButton = document.getElementById("stop-button");
 const speechStatus = document.getElementById("speech-status");
+const copySelectionButton = document.getElementById("copy-selection-button");
+const selectionStatus = document.getElementById("selection-status");
 
 let currentTab = null;
 let latestSummary = "";
@@ -142,6 +144,27 @@ async function extractPage() {
   return page;
 }
 
+async function copyPageSelection() {
+  copySelectionButton.disabled = true;
+  selectionStatus.textContent = "Lecture de la selection...";
+  try {
+    if (!currentTab?.id) throw new Error("Aucun onglet actif detecte.");
+    const [{ result: selectedText }] = await chrome.scripting.executeScript({
+      target: { tabId: currentTab.id },
+      func: () => String(window.getSelection ? window.getSelection().toString() : "").trim(),
+    });
+    if (!selectedText) {
+      throw new Error("Aucun texte selectionne dans la page.");
+    }
+    await navigator.clipboard.writeText(selectedText);
+    selectionStatus.textContent = `${selectedText.length} caracteres copies`;
+  } catch (error) {
+    selectionStatus.textContent = `Erreur: ${error.message}`;
+  } finally {
+    copySelectionButton.disabled = false;
+  }
+}
+
 async function summarizePage() {
   button.disabled = true;
   speakButton.disabled = true;
@@ -177,6 +200,7 @@ async function summarizePage() {
 
 serverInput.addEventListener("change", saveServerUrl);
 button.addEventListener("click", summarizePage);
+copySelectionButton.addEventListener("click", copyPageSelection);
 speakButton.addEventListener("click", speakSummary);
 pauseButton.addEventListener("click", toggleSpeechPause);
 stopButton.addEventListener("click", stopSpeech);
