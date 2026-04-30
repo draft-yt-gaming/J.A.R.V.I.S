@@ -44,6 +44,26 @@ ask_yes_no() {
   esac
 }
 
+ask_password() {
+  local first second
+  while true; do
+    read -r -s -p "Mot de passe root du CT (5 caracteres minimum) : " first
+    echo
+    if [ "${#first}" -lt 5 ]; then
+      warn "Proxmox demande au moins 5 caracteres. Reessaie avec un mot de passe plus long."
+      continue
+    fi
+    read -r -s -p "Confirmer le mot de passe root du CT : " second
+    echo
+    if [ "$first" != "$second" ]; then
+      warn "Les deux mots de passe ne correspondent pas."
+      continue
+    fi
+    printf '%s' "$first"
+    return 0
+  done
+}
+
 next_ctid() {
   local id=120
   while pct status "$id" >/dev/null 2>&1; do
@@ -205,8 +225,7 @@ main() {
   HTTP_PORT="$(ask 'Port HTTP JARVIS' '8080')"
   HTTPS_PORT="$(ask 'Port HTTPS JARVIS' '8443')"
   WS_PORT="$(ask 'Port WebSocket JARVIS' '8765')"
-  PASSWORD="$(ask 'Mot de passe root du CT' '')"
-  [ -n "$PASSWORD" ] || fail "Le mot de passe root du CT est obligatoire."
+  PASSWORD="$(ask_password)"
 
   UNPRIVILEGED=1
   if ask_yes_no 'Creer un CT privilegie ? Non recommande pour JARVIS web' 'n'; then
@@ -233,7 +252,11 @@ main() {
   fi
 
   info "Creation du CT..."
-  pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$template" \
+  if pct status "$CTID" >/dev/null 2>&1; then
+    fail "Le CT $CTID existe deja. Choisis un autre ID ou supprime l'ancien CT avant de relancer."
+  fi
+
+  if ! pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$template" \
     --hostname "$HOSTNAME" \
     --storage "$STORAGE" \
     --rootfs "$STORAGE:${DISK_GB}" \
@@ -245,7 +268,14 @@ main() {
     --unprivileged "$UNPRIVILEGED" \
     --features nesting=1,keyctl=1 \
     --onboot 1 \
-    --start 1
+    --start 1; then
+    warn "La creation du CT a echoue."
+    if pct status "$CTID" >/dev/null 2>&1; then
+      warn "Nettoyage du CT $CTID cree partiellement."
+      pct destroy "$CTID" --purge 1 --force 1 >/dev/null 2>&1 || true
+    fi
+    exit 1
+  fi
 
   info "Attente du reseau dans le CT..."
   sleep 8
