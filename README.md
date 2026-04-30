@@ -190,20 +190,31 @@ Cela permet a l'interface de continuer a recevoir les reponses meme quand seul l
 
 
 
-## APIs publiques gratuites
+## APIs et tokens pris en charge
 
-Jarvis interroge certaines APIs publiques avant Gemini/Groq, uniquement quand la demande correspond clairement a leur domaine. Cela evite de melanger les integrations avec les fournisseurs IA generaux.
+Jarvis separe les APIs specialisees des fournisseurs IA. Les APIs publiques ci-dessous sont interrogees avant Gemini/Groq uniquement quand la demande correspond clairement a leur domaine, afin d'eviter les melanges.
 
-APIs ajoutees :
-- Open-Meteo : meteo et pluie, sans cle ;
-- Open Food Facts : produit, code-barres, Nutri-Score, sans cle ;
-- Nager.Date : jours feries, sans cle ;
-- Wikipedia/Wikimedia : resumes encyclopediques, sans cle ;
-- OpenStreetMap/Nominatim : adresses et coordonnees, sans cle avec User-Agent et usage leger ;
-- Open Library : livres, auteurs et ISBN, sans cle ;
-- NASA APOD : image astronomique du jour, avec `NASA_API_KEY` optionnelle ou `DEMO_KEY` par defaut.
+| Service / API | Usage dans Jarvis | Token requis | Variable / configuration |
+| --- | --- | --- | --- |
+| Gemini | Reponses IA principales, raisonnement, vision selon configuration | Oui | `GEMINI_API_KEY` |
+| Groq | Fournisseur IA alternatif / rapide | Oui | `GROQ_API_KEY` |
+| xAI / Grok | Fournisseur IA alternatif et verifications | Oui | `XAI_API_KEY` |
+| YouTube Data API | Recherche musicale officielle pour le mini-player | Optionnel | `YOUTUBE_API_KEY` ; fallback scraping si absent ou invalide |
+| SerpAPI | Recherche web visuelle avec liens/images | Oui | `SERPAPI_API_KEY` |
+| NASA APOD | Image astronomique du jour | Optionnel | `NASA_API_KEY` ; `DEMO_KEY` sinon |
+| Open-Meteo | Meteo, temperature, pluie, vent | Non | Aucune cle |
+| Open Food Facts | Produit, code-barres, Nutri-Score, allergenes | Non | Aucune cle |
+| Nager.Date | Jours feries par pays | Non | Aucune cle |
+| Wikipedia / Wikimedia | Resume encyclopedique | Non | Aucune cle |
+| OpenStreetMap / Nominatim | Adresse et coordonnees | Non | Aucune cle, User-Agent obligatoire et usage leger |
+| Open Library | Livres, auteurs, ISBN | Non | Aucune cle |
+| Home Assistant | Controle domotique local | Oui | `HA_URL`, `HA_TOKEN` |
+| Proxmox | Gestion VM/LXC, statut, actions | Oui | `PROXMOX_URL`, `PROXMOX_TOKEN_ID`, `PROXMOX_TOKEN_SECRET` |
+| Emby | Bibliotheque media personnelle | Oui | `EMBY_URL`, `EMBY_API_KEY`, puis `EMBY_USER_ID` ou `EMBY_USERNAME` |
+| Discord OAuth | Protection du dashboard administrateur | Oui | `DISCORD_OWNER_ID`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI` |
+| Blagues API | Blagues externes si configure | Oui | `BLAGUES_API_TOKEN` |
 
-Exemples : `meteo demain a Paris`, `jours feries en France`, `wikipedia Nikola Tesla`, `nutriscore coca cola`, `isbn 9782070368228`, `image nasa du jour`, `coordonnees de la tour eiffel`.
+Exemples APIs publiques : `meteo demain a Paris`, `jours feries en France`, `wikipedia Nikola Tesla`, `nutriscore coca cola`, `isbn 9782070368228`, `image nasa du jour`, `coordonnees de la tour eiffel`.
 
 ## Web app mobile Apple/iOS
 
