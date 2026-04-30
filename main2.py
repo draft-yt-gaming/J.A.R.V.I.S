@@ -806,27 +806,31 @@ def trim_discord_content(content, limit=1900):
     return safe_content
 
 
-def cache_discord_summary(summary):
+def cache_discord_summary(summary, audio_bytes=None):
     summary_id = secrets.token_urlsafe(12)
     now = time.time()
     with DISCORD_SUMMARY_CACHE_LOCK:
         expired = [key for key, value in DISCORD_SUMMARY_CACHE.items() if now - value.get("created_at", 0) > DISCORD_SUMMARY_CACHE_TTL]
         for key in expired:
             DISCORD_SUMMARY_CACHE.pop(key, None)
-        DISCORD_SUMMARY_CACHE[summary_id] = {"summary": str(summary or ""), "created_at": now}
+        DISCORD_SUMMARY_CACHE[summary_id] = {
+            "summary": str(summary or ""),
+            "audio_bytes": audio_bytes or b"",
+            "created_at": now,
+        }
     return summary_id
 
 
-def pop_cached_discord_summary(summary_id):
+def get_cached_discord_summary(summary_id):
     now = time.time()
     with DISCORD_SUMMARY_CACHE_LOCK:
         cached = DISCORD_SUMMARY_CACHE.get(str(summary_id or ""))
         if not cached:
-            return ""
+            return None
         if now - cached.get("created_at", 0) > DISCORD_SUMMARY_CACHE_TTL:
             DISCORD_SUMMARY_CACHE.pop(str(summary_id or ""), None)
-            return ""
-        return str(cached.get("summary") or "").strip()
+            return None
+        return dict(cached)
 
 
 def build_discord_show_button(summary_id):
@@ -855,7 +859,7 @@ async def generate_discord_summary_mp3(summary):
     return output_file
 
 
-def post_discord_followup(application_id, interaction_token, content, summary_id="", audio_path=None):
+def post_discord_followup(application_id, interaction_token, content, summary_id="", audio_path=None, audio_bytes=None, flags=64):
     app_id = str(application_id or DISCORD_CLIENT_ID or "").strip()
     token = str(interaction_token or "").strip()
     if not app_id or not token:
@@ -864,14 +868,22 @@ def post_discord_followup(application_id, interaction_token, content, summary_id
     safe_content = trim_discord_content(content or "Je n'ai pas pu generer le resume de ce message.")
     payload = {
         "content": safe_content,
-        "flags": 64,
         "allowed_mentions": {"parse": []},
     }
+    if flags is not None:
+        payload["flags"] = flags
     if summary_id:
         payload["components"] = build_discord_show_button(summary_id)
     try:
         url = f"https://discord.com/api/v10/webhooks/{app_id}/{token}"
-        if audio_path and Path(audio_path).exists():
+        if audio_bytes:
+            response = requests.post(
+                url,
+                data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+                files={"files[0]": ("resume-j.a.r.v.i.s.mp3", io.BytesIO(audio_bytes), "audio/mpeg")},
+                timeout=30,
+            )
+        elif audio_path and Path(audio_path).exists():
             with open(audio_path, "rb") as audio_file:
                 response = requests.post(
                     url,
@@ -889,9 +901,9 @@ def post_discord_followup(application_id, interaction_token, content, summary_id
     return False
 
 
-def build_public_discord_summary_response(summary_id):
-    summary = pop_cached_discord_summary(summary_id)
-    if not summary:
+def build_public_discord_summary_response(payload, summary_id):
+    cached = get_cached_discord_summary(summary_id)
+    if not cached:
         return {
             "type": 4,
             "data": {
@@ -900,10 +912,30 @@ def build_public_discord_summary_response(summary_id):
                 "allowed_mentions": {"parse": []},
             },
         }
+    summary = str(cached.get("summary") or "").strip()
+    audio_bytes = cached.get("audio_bytes") or b""
+    published = post_discord_followup(
+        payload.get("application_id"),
+        payload.get("token"),
+        f"Resume partage par J.A.R.V.I.S :\n\n{summary}",
+        audio_bytes=audio_bytes,
+        flags=None,
+    )
+    if published:
+        return {
+            "type": 7,
+            "data": {
+                "content": trim_discord_content(f"{summary}\n\nResume publie dans le salon avec le MP3."),
+                "flags": 64,
+                "components": [],
+                "allowed_mentions": {"parse": []},
+            },
+        }
     return {
         "type": 4,
         "data": {
-            "content": trim_discord_content(f"Resume partage par J.A.R.V.I.S :\n\n{summary}"),
+            "content": "Je n'ai pas pu publier le resume et le MP3 dans le salon pour le moment.",
+            "flags": 64,
             "allowed_mentions": {"parse": []},
         },
     }
@@ -926,7 +958,13 @@ async def process_discord_message_summary_async(payload):
         print(f"[DISCORD] Erreur resume message : {e}")
         summary = "Je n'ai pas pu resumer ce message pour le moment."
     try:
-        summary_id = cache_discord_summary(summary)
+        audio_bytes = b""
+        try:
+            if audio_path and Path(audio_path).exists():
+                audio_bytes = Path(audio_path).read_bytes()
+        except Exception as e:
+            print(f"[DISCORD] Erreur lecture MP3 cache : {e}")
+        summary_id = cache_discord_summary(summary, audio_bytes=audio_bytes)
         post_discord_followup(payload.get("application_id"), payload.get("token"), summary, summary_id=summary_id, audio_path=audio_path)
     finally:
         try:
@@ -6764,7 +6802,7 @@ def start_http_interface_server():
         if interaction_type == 3:
             custom_id = str(data.get("custom_id") or "")
             if custom_id.startswith("jarvis_show_summary:"):
-                return jsonify(build_public_discord_summary_response(custom_id.split(":", 1)[1]))
+                return jsonify(build_public_discord_summary_response(payload, custom_id.split(":", 1)[1]))
 
         return jsonify({
             "type": 4,
