@@ -820,6 +820,16 @@ def discord_attachment_is_video(attachment):
     return filename.endswith((".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"))
 
 
+def discord_attachment_is_image(attachment):
+    if not isinstance(attachment, dict):
+        return False
+    content_type = str(attachment.get("content_type") or "").lower()
+    filename = str(attachment.get("filename") or "").lower()
+    if content_type.startswith("image/"):
+        return True
+    return filename.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"))
+
+
 def download_discord_media_attachment(attachment, prefix="discord_media", max_size_mb=50):
     url = str(attachment.get("url") or attachment.get("proxy_url") or "").strip()
     if not url:
@@ -1022,6 +1032,86 @@ async def analyze_discord_video_attachments(attachments):
     return analyses
 
 
+def image_file_to_jpeg_bytes(image_path):
+    with Image.open(image_path) as img:
+        img.thumbnail((1024, 1024))
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        elif img.mode == "L":
+            img = img.convert("RGB")
+        output = io.BytesIO()
+        img.save(output, format="JPEG", quality=88, optimize=True)
+        return output.getvalue()
+
+
+async def analyze_discord_images(image_items):
+    if not image_items:
+        return ""
+    if not client:
+        return "Analyse image impossible : Gemini Vision n'est pas configure sur cette machine."
+
+    parts = []
+    names = []
+    for name, image_bytes in image_items[:4]:
+        parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
+        names.append(name)
+    prompt = (
+        "Tu es J.A.R.V.I.S dans Discord. Analyse les images jointes a ce message. "
+        "Decris ce qu'elles montrent, lis le texte visible si possible, et explique les points importants. "
+        "Si plusieurs images sont presentes, distingue-les clairement.\n\n"
+        f"Images: {', '.join(names)}\n"
+        "Format: Description image en 3 a 6 phrases, puis points importants si utile."
+    )
+    parts.append(types.Part(text=prompt))
+    contents = [types.Content(role="user", parts=parts)]
+    last_err = None
+    for model_name in MODELS_LIST:
+        try:
+            response = await gemini_generate_with_failover(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(temperature=0.2),
+                timeout=25.0,
+            )
+            if response.text:
+                return response.text.strip()
+        except Exception as e:
+            print(f"[DISCORD] Echec analyse image Gemini {model_name} : {e}")
+            last_err = e
+    detail = str(last_err or "").lower()
+    if "quota" in detail or "resource_exhausted" in detail or "suspend" in detail:
+        return "Analyse image indisponible pour le moment : le quota Gemini Vision est atteint."
+    return "Analyse image indisponible pour le moment : le modele vision n'a pas repondu correctement."
+
+
+async def analyze_discord_image_attachments(attachments):
+    image_items = []
+    for attachment in attachments[:4]:
+        if not discord_attachment_is_image(attachment):
+            continue
+        image_path = download_discord_media_attachment(attachment, prefix="discord_image", max_size_mb=15)
+        if not image_path:
+            continue
+        try:
+            image_bytes = image_file_to_jpeg_bytes(image_path)
+            name = str(attachment.get("filename") or "image")
+            image_items.append((name, image_bytes))
+        except Exception as e:
+            print(f"[DISCORD] Erreur preparation image : {e}")
+        finally:
+            try:
+                if image_path.exists():
+                    image_path.unlink()
+            except Exception:
+                pass
+    if not image_items:
+        return []
+    analysis = await analyze_discord_images(image_items)
+    if not analysis:
+        return []
+    return ["Images jointes:\n" + analysis]
+
+
 def trim_discord_content(content, limit=1900):
     safe_content = str(content or "").strip()
     if len(safe_content) > limit:
@@ -1168,6 +1258,11 @@ async def process_discord_message_summary_async(payload):
             message_content = (message_content + "\n\nTranscription vocale:\n" + "\n".join(voice_transcripts)).strip()
         elif any(discord_attachment_is_audio(attachment) for attachment in target.get("attachments", [])) and not message_content.strip():
             message_content = "Message vocal present, mais J.A.R.V.I.S n'a pas reussi a le transcrire."
+        image_analyses = await analyze_discord_image_attachments(target.get("attachments", []))
+        if image_analyses:
+            message_content = (message_content + "\n\nAnalyse image:\n" + "\n\n".join(image_analyses)).strip()
+        elif any(discord_attachment_is_image(attachment) for attachment in target.get("attachments", [])) and not message_content.strip():
+            message_content = "Image presente, mais J.A.R.V.I.S n'a pas reussi a l'analyser."
         video_analyses = await analyze_discord_video_attachments(target.get("attachments", []))
         if video_analyses:
             message_content = (message_content + "\n\nAnalyse video:\n" + "\n\n".join(video_analyses)).strip()
