@@ -810,19 +810,30 @@ def discord_attachment_is_audio(attachment):
     return filename.endswith((".ogg", ".oga", ".opus", ".mp3", ".m4a", ".wav", ".webm", ".aac"))
 
 
-def download_discord_audio_attachment(attachment):
+def discord_attachment_is_video(attachment):
+    if not isinstance(attachment, dict):
+        return False
+    content_type = str(attachment.get("content_type") or "").lower()
+    filename = str(attachment.get("filename") or "").lower()
+    if content_type.startswith("video/"):
+        return True
+    return filename.endswith((".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"))
+
+
+def download_discord_media_attachment(attachment, prefix="discord_media", max_size_mb=50):
     url = str(attachment.get("url") or attachment.get("proxy_url") or "").strip()
     if not url:
         return None
     size = int(attachment.get("size") or 0)
-    if size > 25 * 1024 * 1024:
-        print(f"[DISCORD] Audio ignore, fichier trop gros : {size} octets")
+    max_bytes = max_size_mb * 1024 * 1024
+    if size > max_bytes:
+        print(f"[DISCORD] Media ignore, fichier trop gros : {size} octets")
         return None
-    filename = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(attachment.get("filename") or "voice.ogg"))[:80]
-    suffix = Path(filename).suffix or ".ogg"
-    input_path = BASE_DIR / f"discord_voice_{int(time.time() * 1000)}_{secrets.token_hex(4)}{suffix}"
+    filename = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(attachment.get("filename") or "media.bin"))[:80]
+    suffix = Path(filename).suffix or ".bin"
+    input_path = BASE_DIR / f"{prefix}_{int(time.time() * 1000)}_{secrets.token_hex(4)}{suffix}"
     try:
-        with requests.get(url, timeout=20, stream=True) as response:
+        with requests.get(url, timeout=25, stream=True) as response:
             response.raise_for_status()
             total = 0
             with open(input_path, "wb") as f:
@@ -830,18 +841,22 @@ def download_discord_audio_attachment(attachment):
                     if not chunk:
                         continue
                     total += len(chunk)
-                    if total > 25 * 1024 * 1024:
-                        raise ValueError("audio_too_large")
+                    if total > max_bytes:
+                        raise ValueError("media_too_large")
                     f.write(chunk)
         return input_path
     except Exception as e:
-        print(f"[DISCORD] Erreur telechargement audio : {e}")
+        print(f"[DISCORD] Erreur telechargement media : {e}")
         try:
             if input_path.exists():
                 input_path.unlink()
         except Exception:
             pass
     return None
+
+
+def download_discord_audio_attachment(attachment):
+    return download_discord_media_attachment(attachment, prefix="discord_voice", max_size_mb=25)
 
 
 def transcribe_audio_file_fr(input_path):
@@ -890,6 +905,121 @@ def transcribe_discord_audio_attachments(attachments):
             except Exception:
                 pass
     return transcripts
+
+
+def extract_video_frames(video_path, max_frames=6):
+    frames_dir = BASE_DIR / f"discord_video_frames_{int(time.time() * 1000)}_{secrets.token_hex(4)}"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        output_pattern = frames_dir / "frame_%02d.jpg"
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", str(video_path),
+                "-vf", "fps=1/3,scale=768:-2",
+                "-frames:v", str(max_frames),
+                str(output_pattern),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=45,
+        )
+        return sorted(frames_dir.glob("frame_*.jpg"))
+    except Exception as e:
+        print(f"[DISCORD] Erreur extraction frames video : {e}")
+        try:
+            shutil.rmtree(frames_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return []
+
+
+async def analyze_discord_video_frames(frame_paths, filename="video", audio_transcript=""):
+    if not frame_paths:
+        return "Analyse video impossible : aucune image exploitable n'a pu etre extraite."
+    if not client:
+        return "Analyse video impossible : Gemini Vision n'est pas configure sur cette machine."
+
+    parts = []
+    for frame_path in frame_paths[:6]:
+        try:
+            parts.append(types.Part.from_bytes(data=Path(frame_path).read_bytes(), mime_type="image/jpeg"))
+        except Exception as e:
+            print(f"[DISCORD] Frame ignoree : {e}")
+    if not parts:
+        return "Analyse video impossible : les images extraites ne sont pas lisibles."
+
+    prompt = (
+        "Tu es J.A.R.V.I.S dans Discord. Analyse ces images extraites dans l'ordre depuis une video envoyee en piece jointe. "
+        "Dis clairement ce que la personne montre, fait, ou ce qui se passe dans la video. "
+        "Ne pretends pas voir le mouvement complet : base-toi sur les images cles et signale les incertitudes.\n\n"
+        f"Nom du fichier: {filename}\n"
+        f"Transcription audio eventuelle: {audio_transcript or 'indisponible'}\n"
+        "Format: Description video en 3 a 6 phrases, puis points importants si utile."
+    )
+    parts.append(types.Part(text=prompt))
+    contents = [types.Content(role="user", parts=parts)]
+    last_err = None
+    for model_name in MODELS_LIST:
+        try:
+            response = await gemini_generate_with_failover(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(temperature=0.2),
+                timeout=25.0,
+            )
+            if response.text:
+                return response.text.strip()
+        except Exception as e:
+            print(f"[DISCORD] Echec analyse video Gemini {model_name} : {e}")
+            last_err = e
+    detail = str(last_err or "").lower()
+    if "quota" in detail or "resource_exhausted" in detail or "suspend" in detail:
+        return "Analyse video indisponible pour le moment : le quota Gemini Vision est atteint. La transcription audio reste utilisee si disponible."
+    return "Analyse video indisponible pour le moment : le modele vision n'a pas repondu correctement."
+
+
+async def analyze_discord_video_attachments(attachments):
+    analyses = []
+    for attachment in attachments[:2]:
+        if not discord_attachment_is_video(attachment):
+            continue
+        video_path = download_discord_media_attachment(attachment, prefix="discord_video", max_size_mb=50)
+        if not video_path:
+            continue
+        frames = []
+        try:
+            audio_transcript = ""
+            try:
+                audio_transcript = transcribe_audio_file_fr(video_path)
+            except sr.UnknownValueError:
+                print("[DISCORD] Audio de la video non compris")
+            except Exception as e:
+                print(f"[DISCORD] Transcription audio video indisponible : {e}")
+            frames = extract_video_frames(video_path)
+            name = str(attachment.get("filename") or "video")
+            visual_analysis = await analyze_discord_video_frames(frames, filename=name, audio_transcript=audio_transcript)
+            pieces = [f"Video {name}:", visual_analysis]
+            if audio_transcript:
+                pieces.append(f"Transcription audio: {audio_transcript}")
+            analyses.append("\n".join(pieces))
+        finally:
+            try:
+                if video_path.exists():
+                    video_path.unlink()
+            except Exception:
+                pass
+            for frame in frames:
+                try:
+                    Path(frame).unlink()
+                except Exception:
+                    pass
+            if frames:
+                try:
+                    shutil.rmtree(Path(frames[0]).parent, ignore_errors=True)
+                except Exception:
+                    pass
+    return analyses
 
 
 def trim_discord_content(content, limit=1900):
@@ -1038,6 +1168,11 @@ async def process_discord_message_summary_async(payload):
             message_content = (message_content + "\n\nTranscription vocale:\n" + "\n".join(voice_transcripts)).strip()
         elif any(discord_attachment_is_audio(attachment) for attachment in target.get("attachments", [])) and not message_content.strip():
             message_content = "Message vocal present, mais J.A.R.V.I.S n'a pas reussi a le transcrire."
+        video_analyses = await analyze_discord_video_attachments(target.get("attachments", []))
+        if video_analyses:
+            message_content = (message_content + "\n\nAnalyse video:\n" + "\n\n".join(video_analyses)).strip()
+        elif any(discord_attachment_is_video(attachment) for attachment in target.get("attachments", [])) and not message_content.strip():
+            message_content = "Video presente, mais J.A.R.V.I.S n'a pas reussi a extraire une analyse exploitable."
         summary = await resumer_message_discord(
             author=target["author"],
             content=message_content,

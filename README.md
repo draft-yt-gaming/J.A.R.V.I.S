@@ -439,7 +439,7 @@ Dans le Discord Developer Portal, configure l'Interactions Endpoint URL sur ton 
 https://jarvis.drafthome.fr/api/discord/interactions
 ```
 
-La commande est globale et peut etre installee sur un serveur ou comme application utilisateur Discord. Elle peut resumer un message texte ou un message vocal/audio : J.A.R.V.I.S tente alors une transcription francaise avant le resume. Le resume est d'abord renvoye en message ephemere, visible seulement par la personne qui a clique, avec un fichier MP3 genere par la meme voix que J.A.R.V.I.S. Le bouton `Montrer` sous le resume permet ensuite de publier ce resume et son MP3 dans le salon pour tout le monde.
+La commande est globale et peut etre installee sur un serveur ou comme application utilisateur Discord. Elle peut resumer un message texte, un message vocal/audio ou une video : J.A.R.V.I.S tente alors une transcription francaise et, pour les videos, extrait quelques images cles pour decrire ce que la personne montre ou fait avant le resume. Le resume est d'abord renvoye en message ephemere, visible seulement par la personne qui a clique, avec un fichier MP3 genere par la meme voix que J.A.R.V.I.S. Le bouton `Montrer` sous le resume permet ensuite de publier ce resume et son MP3 dans le salon pour tout le monde.
 
 ## Dashboard et securite
 
