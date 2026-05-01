@@ -5086,6 +5086,38 @@ async def resumer_page_extension(page_title, page_url, page_text):
     return "Je n'ai pas pu generer le resume pour le moment, mais le texte de la page a bien ete transmis par l'extension."
 
 
+def resumer_message_discord_local(author, content):
+    text = re.sub(r"\s+", " ", str(content or "")).strip()
+    if not text:
+        return "Je n'ai pas assez de texte lisible dans ce message Discord pour le resumer."
+
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
+    if not sentences:
+        sentences = [text]
+
+    short_summary = " ".join(sentences[:2]).strip()
+    if len(short_summary) > 450:
+        short_summary = short_summary[:447].rstrip() + "..."
+
+    important = []
+    for sentence in sentences[:8]:
+        lowered = sentence.lower()
+        if any(word in lowered for word in ["urgent", "important", "demain", "aujourd", "rdv", "rendez-vous", "bug", "probleme", "erreur", "faire", "besoin", "doit", "peux", "peut"]):
+            important.append(sentence)
+        if len(important) >= 3:
+            break
+
+    lines = [f"Resume: {short_summary}"]
+    if important:
+        lines.append("Points importants:")
+        lines.extend(f"- {item[:220].rstrip()}" for item in important)
+    else:
+        lines.append("Points importants: aucun point d'action evident detecte localement.")
+    lines.append("Note: resume local utilise car les fournisseurs IA sont indisponibles ou en quota.")
+    return "\n".join(lines)
+
+
 async def resumer_message_discord(author, content, jump_url=""):
     content = str(content or "").strip()
     if not content:
@@ -5152,7 +5184,7 @@ async def resumer_message_discord(author, content, jump_url=""):
     if rep_ollama:
         return rep_ollama.strip()
 
-    return "Je n'ai pas pu generer le resume Discord pour le moment."
+    return resumer_message_discord_local(author, content)
 
 
 async def demander_ia(texte):
