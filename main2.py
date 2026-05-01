@@ -1691,8 +1691,53 @@ def extract_discord_file_analysis_attachment(payload):
     return {}, "Je n'ai pas trouve de piece jointe exploitable dans ce message."
 
 
+def build_discord_file_analysis_tts_text(result, static_report=""):
+    text = str(result or static_report or "").strip()
+    report = str(static_report or "")
+    filename = ""
+    verdict = ""
+    detected_type = ""
+    size = ""
+    alerts = []
+    for line in report.splitlines():
+        clean = line.strip()
+        if clean.startswith("Fichier:"):
+            filename = clean.split(":", 1)[1].strip()
+        elif clean.startswith("Verdict:"):
+            verdict = clean.split(":", 1)[1].strip()
+        elif clean.startswith("Type detecte:"):
+            detected_type = clean.split(":", 1)[1].strip()
+        elif clean.startswith("Taille:"):
+            size = clean.split(":", 1)[1].strip()
+        elif clean.startswith("- ") and len(alerts) < 2:
+            lower = clean.lower()
+            if any(word in lower for word in ["suspect", "danger", "executable", "script", "macro", "powershell", "cmd", "virustotal", "archive"]):
+                alerts.append(clean[2:].strip())
+
+    pieces = ["Analyse fichier terminee."]
+    if filename:
+        pieces.append(f"Fichier {filename}.")
+    if verdict:
+        pieces.append(f"Verdict: {verdict}.")
+    if detected_type:
+        pieces.append(f"Type detecte: {detected_type}.")
+    if size:
+        pieces.append(f"Taille: {size}.")
+    if alerts:
+        pieces.append("Points a surveiller: " + "; ".join(alerts) + ".")
+    pieces.append("Par prudence, ne lance pas ce fichier si tu n'as pas confiance en sa source.")
+
+    spoken = " ".join(pieces)
+    if len(spoken) < 80 and text:
+        spoken = text[:700]
+    spoken = re.sub(r"[*#`_>\[\](){}]", "", spoken)
+    spoken = re.sub(r"\b[0-9a-fA-F]{32,}\b", "empreinte", spoken)
+    return spoken[:900].strip()
+
+
 async def process_discord_file_analysis_async(payload):
     file_path = None
+    audio_path = None
     static_report = ""
     filename = "analyse-fichier-jarvis.txt"
     try:
@@ -1711,6 +1756,11 @@ async def process_discord_file_analysis_async(payload):
                 else:
                     static_report = static_analyze_discord_file(file_path, attachment)
                     result = await explain_discord_file_analysis(static_report)
+        try:
+            tts_text = build_discord_file_analysis_tts_text(result, static_report)
+            audio_path = await generate_discord_summary_mp3(tts_text)
+        except Exception as e:
+            print(f"[DISCORD] Erreur generation MP3 analyse fichier : {e}")
     except Exception as e:
         print(f"[DISCORD] Erreur analyse fichier : {e}")
         result = "Je n'ai pas pu analyser ce fichier pour le moment."
@@ -1721,18 +1771,31 @@ async def process_discord_file_analysis_async(payload):
         except Exception:
             pass
 
+    audio_bytes = b""
+    try:
+        if audio_path and Path(audio_path).exists():
+            audio_bytes = Path(audio_path).read_bytes()
+    except Exception as e:
+        print(f"[DISCORD] Erreur lecture MP3 analyse fichier : {e}")
+
+    summary_id = cache_discord_summary(result, audio_bytes=audio_bytes)
+    post_discord_followup(payload.get("application_id"), payload.get("token"), result, summary_id=summary_id, audio_path=audio_path, flags=64)
+
     if static_report and (len(static_report) > 1700 or static_report.strip() != str(result or "").strip()):
-        sent = post_discord_text_attachment_followup(
+        post_discord_text_attachment_followup(
             payload.get("application_id"),
             payload.get("token"),
-            str(result or "Analyse fichier terminee.").strip() + "\n\nRapport statique complet joint en fichier texte.",
+            "Rapport statique complet joint en fichier texte. Le bouton Montrer est sur le verdict principal.",
             f"analyse-jarvis-{Path(filename).stem}.txt",
             static_report,
             flags=64,
         )
-        if sent:
-            return
-    post_discord_followup(payload.get("application_id"), payload.get("token"), result, flags=64)
+
+    try:
+        if audio_path and Path(audio_path).exists():
+            Path(audio_path).unlink()
+    except Exception:
+        pass
 
 
 def process_discord_file_analysis(payload):
@@ -1879,7 +1942,7 @@ def publish_discord_summary_from_button(payload, summary_id):
         post_discord_followup(
             payload.get("application_id"),
             payload.get("token"),
-            "Ce resume n'est plus disponible. Redemande un resume du message puis appuie sur Montrer.",
+            "Ce resultat n'est plus disponible. Redemande l'action J.A.R.V.I.S puis appuie sur Montrer.",
             flags=64,
         )
         return
@@ -1889,7 +1952,7 @@ def publish_discord_summary_from_button(payload, summary_id):
     published = post_discord_followup(
         payload.get("application_id"),
         payload.get("token"),
-        f"Resume partage par J.A.R.V.I.S :\n\n{summary}",
+        f"Resultat partage par J.A.R.V.I.S :\n\n{summary}",
         audio_bytes=audio_bytes,
         flags=None,
     )
@@ -1897,7 +1960,7 @@ def publish_discord_summary_from_button(payload, summary_id):
         post_discord_followup(
             payload.get("application_id"),
             payload.get("token"),
-            "Je n'ai pas pu publier le resume et le MP3 dans le salon pour le moment.",
+            "Je n'ai pas pu publier le resultat et le MP3 dans le salon pour le moment.",
             flags=64,
         )
 
