@@ -94,6 +94,7 @@ const DASHBOARD_FIELDS: DashboardField[] = [
   { key: "EMBY_USERNAME", label: "Emby Username", type: "text", section: "Media" },
   { key: "SERPAPI_API_KEY", label: "SerpAPI Key", type: "password", section: "Services" },
   { key: "NASA_API_KEY", label: "NASA API Key", type: "password", section: "Services", placeholder: "Optionnel, DEMO_KEY sinon" },
+  { key: "VIRUSTOTAL_API_KEY", label: "VirusTotal API Key", type: "password", section: "Services", placeholder: "Optionnel, recherche par hash uniquement" },
   { key: "HA_URL", label: "Home Assistant URL", type: "url", section: "Home Assistant", placeholder: "http://192.168.x.x:8123" },
   { key: "HA_TOKEN", label: "Home Assistant Token", type: "password", section: "Home Assistant" },
   { key: "PROXMOX_URL", label: "Proxmox URL", type: "url", section: "Proxmox", placeholder: "https://192.168.x.x:8006" },

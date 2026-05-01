@@ -35,6 +35,10 @@ import base64
 import io
 import urllib3
 import secrets
+import hashlib
+import struct
+import mimetypes
+import zipfile
 from functools import wraps
 from contextvars import ContextVar
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -90,6 +94,7 @@ COMMAND_HTTP_CLIENT_ID = ContextVar("jarvis_http_client_id", default="")
 DISCORD_SUMMARY_CACHE = {}
 DISCORD_SUMMARY_CACHE_LOCK = threading.Lock()
 DISCORD_SUMMARY_CACHE_TTL = 15 * 60
+DISCORD_FILE_ANALYSIS_COMMAND_NAME = "analyser-fichier"
 
 
 class DebugTeeStream:
@@ -176,6 +181,7 @@ DEFAULT_SETTINGS = {
     "SERPAPI_API_KEY": os.getenv("SERPAPI_API_KEY", ""),
     "GROQ_API_KEY": os.getenv("GROQ_API_KEY", ""),
     "NASA_API_KEY": os.getenv("NASA_API_KEY", ""),
+    "VIRUSTOTAL_API_KEY": os.getenv("VIRUSTOTAL_API_KEY", ""),
     "OLLAMA_ENABLED": os.getenv("OLLAMA_ENABLED", "false"),
     "OLLAMA_PREFER_LOCAL": os.getenv("OLLAMA_PREFER_LOCAL", "false"),
     "OLLAMA_URL": os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"),
@@ -208,6 +214,7 @@ SENSITIVE_SETTINGS = {
     "SERPAPI_API_KEY",
     "GROQ_API_KEY",
     "NASA_API_KEY",
+    "VIRUSTOTAL_API_KEY",
     "EMBY_API_KEY",
     "PROXMOX_TOKEN_SECRET",
     "DISCORD_CLIENT_SECRET",
@@ -262,6 +269,7 @@ HOME_LOCATION_NAME = ""
 SERPAPI_API_KEY = ""
 GROQ_API_KEY = ""
 NASA_API_KEY = ""
+VIRUSTOTAL_API_KEY = ""
 OLLAMA_ENABLED = False
 OLLAMA_PREFER_LOCAL = False
 OLLAMA_URL = "http://127.0.0.1:11434"
@@ -291,6 +299,7 @@ HA_CONFIGURED = False
 SERPAPI_CONFIGURED = False
 GROQ_CONFIGURED = False
 NASA_CONFIGURED = False
+VIRUSTOTAL_CONFIGURED = False
 OLLAMA_CONFIGURED = False
 EMBY_CONFIGURED = False
 PROXMOX_CONFIGURED = False
@@ -304,14 +313,14 @@ app = None
 
 def refresh_runtime_config():
     global ASSISTANT_NAME, GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_MODEL_KEY_BLOCKED_UNTIL, BLAGUES_API_TOKEN, YOUTUBE_API_KEY, XAI_API_KEY
-    global HA_URL, HA_TOKEN, HA_WEATHER_ENTITY, HOME_LOCATION_NAME, SERPAPI_API_KEY, GROQ_API_KEY, NASA_API_KEY
+    global HA_URL, HA_TOKEN, HA_WEATHER_ENTITY, HOME_LOCATION_NAME, SERPAPI_API_KEY, GROQ_API_KEY, NASA_API_KEY, VIRUSTOTAL_API_KEY
     global OLLAMA_ENABLED, OLLAMA_PREFER_LOCAL, OLLAMA_URL, OLLAMA_MODELS
     global EMBY_URL, EMBY_API_KEY, EMBY_USER_ID, EMBY_USERNAME
     global PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_VERIFY_SSL
     global DISCORD_OWNER_ID, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI, DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN
     global JARVIS_SESSION_SECRET, EXTENSION_ACCESS_TOKEN
     global GEMINI_CONFIGURED, BLAGUES_CONFIGURED, YOUTUBE_CONFIGURED, XAI_CONFIGURED, HA_CONFIGURED
-    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, NASA_CONFIGURED, OLLAMA_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
+    global SERPAPI_CONFIGURED, GROQ_CONFIGURED, NASA_CONFIGURED, VIRUSTOTAL_CONFIGURED, OLLAMA_CONFIGURED, EMBY_CONFIGURED, PROXMOX_CONFIGURED, DISCORD_CONFIGURED
     global client, GEMINI_CLIENTS, blagues_client, grok_client, groq_client, HA_HEADERS
 
     settings = RUNTIME_SETTINGS
@@ -327,6 +336,7 @@ def refresh_runtime_config():
     SERPAPI_API_KEY = settings.get("SERPAPI_API_KEY", "")
     GROQ_API_KEY = settings.get("GROQ_API_KEY", "")
     NASA_API_KEY = settings.get("NASA_API_KEY", "")
+    VIRUSTOTAL_API_KEY = str(settings.get("VIRUSTOTAL_API_KEY", "")).strip()
     OLLAMA_ENABLED = str(settings.get("OLLAMA_ENABLED", "false")).strip().lower() in ("1", "true", "yes", "on")
     OLLAMA_PREFER_LOCAL = str(settings.get("OLLAMA_PREFER_LOCAL", "false")).strip().lower() in ("1", "true", "yes", "on")
     OLLAMA_URL = str(settings.get("OLLAMA_URL", "http://127.0.0.1:11434")).strip().rstrip("/") or "http://127.0.0.1:11434"
@@ -360,6 +370,7 @@ def refresh_runtime_config():
     SERPAPI_CONFIGURED = env_value_is_configured(SERPAPI_API_KEY)
     GROQ_CONFIGURED = env_value_is_configured(GROQ_API_KEY)
     NASA_CONFIGURED = env_value_is_configured(NASA_API_KEY)
+    VIRUSTOTAL_CONFIGURED = env_value_is_configured(VIRUSTOTAL_API_KEY)
     OLLAMA_CONFIGURED = OLLAMA_ENABLED and env_value_is_configured(OLLAMA_URL) and bool(OLLAMA_MODELS)
     EMBY_CONFIGURED = env_value_is_configured(EMBY_URL) and env_value_is_configured(EMBY_API_KEY)
     PROXMOX_CONFIGURED = all(
@@ -410,6 +421,7 @@ def get_service_config_flags():
         "serpapi": SERPAPI_CONFIGURED,
         "groq": GROQ_CONFIGURED,
         "nasa": True,
+        "virustotal": VIRUSTOTAL_CONFIGURED,
         "ollama": OLLAMA_CONFIGURED,
         "emby": EMBY_CONFIGURED,
         "proxmox": PROXMOX_CONFIGURED,
@@ -638,6 +650,7 @@ def get_private_runtime_settings():
         "SERPAPI_API_KEY": SERPAPI_API_KEY,
         "GROQ_API_KEY": GROQ_API_KEY,
         "NASA_API_KEY": NASA_API_KEY,
+        "VIRUSTOTAL_API_KEY": VIRUSTOTAL_API_KEY,
         "OLLAMA_ENABLED": OLLAMA_ENABLED,
         "OLLAMA_PREFER_LOCAL": OLLAMA_PREFER_LOCAL,
         "OLLAMA_URL": OLLAMA_URL,
@@ -828,6 +841,7 @@ def discord_attachment_is_image(attachment):
     if content_type.startswith("image/"):
         return True
     return filename.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"))
+
 
 
 def download_discord_media_attachment(attachment, prefix="discord_media", max_size_mb=50):
@@ -1112,6 +1126,593 @@ async def analyze_discord_image_attachments(attachments):
     return ["Images jointes:\n" + analysis]
 
 
+def extract_discord_slash_attachment(payload, option_name="fichier"):
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    options = data.get("options", []) if isinstance(data, dict) else []
+    attachment_id = ""
+    if isinstance(options, list):
+        for option in options:
+            if not isinstance(option, dict):
+                continue
+            if str(option.get("name") or "") == option_name:
+                attachment_id = str(option.get("value") or "").strip()
+                break
+    resolved = data.get("resolved", {}) if isinstance(data, dict) else {}
+    attachments = resolved.get("attachments", {}) if isinstance(resolved, dict) else {}
+    attachment = attachments.get(attachment_id) if isinstance(attachments, dict) and attachment_id else None
+    if not isinstance(attachment, dict) and isinstance(attachments, dict) and attachments:
+        attachment = next(iter(attachments.values()), {})
+    return attachment if isinstance(attachment, dict) else {}
+
+
+def file_size_label(size):
+    try:
+        size = int(size)
+    except Exception:
+        size = 0
+    units = ["o", "Ko", "Mo", "Go"]
+    value = float(size)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "o":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+
+
+def printable_ascii_strings(data, limit=12):
+    found = []
+    for match in re.finditer(rb"[ -~]{6,120}", data or b""):
+        text = match.group(0).decode("ascii", errors="ignore").strip()
+        if text and text not in found:
+            found.append(text)
+        if len(found) >= limit:
+            break
+    return found
+
+
+def detect_file_signature(sample, filename=""):
+    lower_name = str(filename or "").lower()
+    suffix = Path(lower_name).suffix
+    if sample.startswith(b"MZ"):
+        return "Executable Windows PE/DLL"
+    if sample.startswith(b"\x7fELF"):
+        return "Executable Linux ELF"
+    if sample[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"):
+        return "Executable macOS Mach-O"
+    if sample.startswith(b"#!"):
+        return "Script avec shebang"
+    if sample.startswith(b"PK\x03\x04"):
+        if suffix == ".apk":
+            return "Paquet Android APK"
+        if suffix == ".jar":
+            return "Archive Java JAR"
+        if suffix in (".docx", ".xlsx", ".pptx", ".docm", ".xlsm", ".pptm"):
+            return "Document Office OpenXML"
+        return "Archive ZIP"
+    if sample.startswith(b"%PDF"):
+        return "Document PDF"
+    if sample.startswith(b"Rar!"):
+        return "Archive RAR"
+    if sample.startswith(b"7z\xbc\xaf\x27\x1c"):
+        return "Archive 7-Zip"
+    if sample.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        return "Ancien document Office/OLE"
+    guessed_type, _ = mimetypes.guess_type(str(filename or ""))
+    if guessed_type:
+        return guessed_type
+    return "Type inconnu ou donnees binaires generiques"
+
+
+def inspect_zip_safely(path, max_entries=80):
+    report = {
+        "entries": [],
+        "entry_count": 0,
+        "macro": False,
+        "risky_entries": [],
+        "encrypted_entries": [],
+        "path_traversal_entries": [],
+        "compressed_size": 0,
+        "uncompressed_size": 0,
+        "largest_entries": [],
+        "errors": [],
+    }
+    risky_suffixes = {
+        ".exe", ".dll", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jse",
+        ".msi", ".jar", ".apk", ".sh", ".py", ".pl", ".rb", ".elf", ".so",
+    }
+    try:
+        with zipfile.ZipFile(path) as zf:
+            infos = zf.infolist()
+            report["entry_count"] = len(infos)
+            report["compressed_size"] = sum(max(0, int(info.compress_size or 0)) for info in infos)
+            report["uncompressed_size"] = sum(max(0, int(info.file_size or 0)) for info in infos)
+            largest = sorted(infos, key=lambda item: int(item.file_size or 0), reverse=True)[:5]
+            report["largest_entries"] = [f"{info.filename[:120]} ({file_size_label(info.file_size)})" for info in largest]
+            for info in infos[:max_entries]:
+                name = str(info.filename or "")
+                report["entries"].append(name[:160])
+                lower = name.lower()
+                parts = Path(lower).parts
+                if lower.startswith(("/", "\\")) or ".." in parts:
+                    report["path_traversal_entries"].append(name[:160])
+                if info.flag_bits & 0x1:
+                    report["encrypted_entries"].append(name[:160])
+                if lower.endswith("vbaproject.bin") or "/macros/" in lower:
+                    report["macro"] = True
+                if Path(lower).suffix in risky_suffixes:
+                    report["risky_entries"].append(name[:160])
+    except Exception as e:
+        report["errors"].append(str(e)[:180])
+    return report
+
+
+def shannon_entropy(data):
+    if not data:
+        return 0.0
+    counts = [0] * 256
+    for byte in data:
+        counts[byte] += 1
+    total = len(data)
+    entropy = 0.0
+    for count in counts:
+        if count:
+            p = count / total
+            entropy -= p * math.log2(p)
+    return entropy
+
+
+def entropy_label(value):
+    if value >= 7.2:
+        return "tres elevee, possible compression/chiffrement/packing"
+    if value >= 6.4:
+        return "elevee"
+    if value <= 1.0:
+        return "tres faible"
+    return "normale"
+
+
+def format_unix_timestamp(ts):
+    try:
+        ts = int(ts)
+        if ts <= 0:
+            return "indisponible"
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "indisponible"
+
+
+def detect_text_profile(sample):
+    if not sample:
+        return "vide"
+    nul_ratio = sample.count(0) / max(1, len(sample))
+    printable = sum(1 for b in sample if b in (9, 10, 13) or 32 <= b <= 126)
+    printable_ratio = printable / max(1, len(sample))
+    if nul_ratio > 0.05:
+        return "binaire avec octets nuls"
+    if printable_ratio > 0.92:
+        return "texte lisible"
+    if printable_ratio > 0.65:
+        return "mixte texte/binaire"
+    return "binaire"
+
+
+def extract_file_indicators(sample):
+    text = sample.decode("latin-1", errors="ignore")
+    urls = []
+    for match in re.finditer(r"https?://[^\s'\"<>)]{4,240}", text, flags=re.I):
+        value = match.group(0).rstrip(".,;]")
+        if value not in urls:
+            urls.append(value)
+        if len(urls) >= 12:
+            break
+    ipv4 = []
+    for match in re.finditer(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text):
+        value = match.group(0)
+        try:
+            ipaddress.ip_address(value)
+        except Exception:
+            continue
+        if value not in ipv4:
+            ipv4.append(value)
+        if len(ipv4) >= 12:
+            break
+    domains = []
+    for match in re.finditer(r"\b(?:[a-z0-9-]{2,}\.)+[a-z]{2,24}\b", text, flags=re.I):
+        value = match.group(0).lower()
+        if value.startswith(("http", "www.")):
+            continue
+        if value not in domains:
+            domains.append(value)
+        if len(domains) >= 12:
+            break
+    keywords = []
+    for keyword in [
+        "powershell", "cmd.exe", "wscript", "cscript", "rundll32", "regsvr32", "schtasks",
+        "certutil", "bitsadmin", "invoke-webrequest", "downloadstring", "base64", "frombase64string",
+        "autorun", "startup", "keylogger", "wallet", "token", "discord", "webhook",
+    ]:
+        if keyword.encode("ascii", errors="ignore").lower() in sample.lower():
+            keywords.append(keyword)
+    return {"urls": urls, "ipv4": ipv4, "domains": domains, "keywords": keywords}
+
+
+def parse_pe_info(data):
+    info = {}
+    try:
+        if len(data) < 0x40 or not data.startswith(b"MZ"):
+            return info
+        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+        if pe_offset <= 0 or pe_offset + 24 > len(data) or data[pe_offset:pe_offset + 4] != b"PE\0\0":
+            return info
+        machine, sections, timestamp, _, _, optional_size, characteristics = struct.unpack_from("<HHIIIHH", data, pe_offset + 4)
+        machine_map = {0x14C: "x86", 0x8664: "x64", 0x1C0: "ARM", 0xAA64: "ARM64"}
+        info["machine"] = machine_map.get(machine, hex(machine))
+        info["sections"] = sections
+        info["timestamp"] = format_unix_timestamp(timestamp)
+        flags = []
+        if characteristics & 0x0002:
+            flags.append("executable")
+        if characteristics & 0x2000:
+            flags.append("DLL")
+        if characteristics & 0x0001:
+            flags.append("relocs_stripped")
+        info["flags"] = flags
+        optional_offset = pe_offset + 24
+        if optional_offset + optional_size <= len(data) and optional_size >= 72:
+            magic = struct.unpack_from("<H", data, optional_offset)[0]
+            subsystem_offset = optional_offset + (92 if magic == 0x20B else 68)
+            if subsystem_offset + 2 <= len(data):
+                subsystem = struct.unpack_from("<H", data, subsystem_offset)[0]
+                subsystem_map = {2: "Windows GUI", 3: "Windows console", 9: "Windows CE", 10: "EFI application"}
+                info["subsystem"] = subsystem_map.get(subsystem, str(subsystem))
+        section_offset = optional_offset + optional_size
+        parsed_sections = []
+        for i in range(min(sections, 12)):
+            off = section_offset + i * 40
+            if off + 40 > len(data):
+                break
+            raw_name = data[off:off + 8].split(b"\0", 1)[0]
+            name = raw_name.decode("ascii", errors="replace") or f"section_{i}"
+            virtual_size, virtual_address, raw_size, raw_ptr = struct.unpack_from("<IIII", data, off + 8)
+            section_data = data[raw_ptr:raw_ptr + raw_size] if raw_ptr < len(data) else b""
+            parsed_sections.append({
+                "name": name,
+                "raw_size": raw_size,
+                "virtual_size": virtual_size,
+                "entropy": round(shannon_entropy(section_data[:1024 * 1024]), 2),
+            })
+        info["section_details"] = parsed_sections
+    except Exception as e:
+        info["error"] = str(e)[:160]
+    return info
+
+
+def parse_elf_info(data):
+    info = {}
+    try:
+        if len(data) < 20 or not data.startswith(b"\x7fELF"):
+            return info
+        elf_class = data[4]
+        endian = "<" if data[5] == 1 else ">" if data[5] == 2 else "<"
+        info["class"] = "64-bit" if elf_class == 2 else "32-bit" if elf_class == 1 else "inconnue"
+        info["endian"] = "little" if data[5] == 1 else "big" if data[5] == 2 else "inconnu"
+        e_type, e_machine = struct.unpack_from(endian + "HH", data, 16)
+        type_map = {1: "relocatable", 2: "executable", 3: "shared object", 4: "core"}
+        machine_map = {3: "x86", 40: "ARM", 62: "x86_64", 183: "AArch64", 243: "RISC-V"}
+        info["type"] = type_map.get(e_type, str(e_type))
+        info["machine"] = machine_map.get(e_machine, str(e_machine))
+    except Exception as e:
+        info["error"] = str(e)[:160]
+    return info
+
+
+def inspect_pdf_sample(sample):
+    lower = sample.lower()
+    return {
+        "javascript_markers": lower.count(b"/javascript") + lower.count(b"/js"),
+        "open_action": b"/openaction" in lower,
+        "additional_actions": b"/aa" in lower,
+        "embedded_files": b"/embeddedfile" in lower,
+    }
+
+
+def lookup_virustotal_file_hash(sha256):
+    if not env_value_is_configured(VIRUSTOTAL_API_KEY):
+        return "VirusTotal: non configure (VIRUSTOTAL_API_KEY manquante). Recherche par hash ignoree."
+    try:
+        response = requests.get(
+            f"https://www.virustotal.com/api/v3/files/{sha256}",
+            headers={"x-apikey": VIRUSTOTAL_API_KEY},
+            timeout=12,
+        )
+        if response.status_code == 404:
+            return "VirusTotal: hash inconnu dans la base publique. Le fichier n'a pas ete envoye."
+        if response.status_code == 429:
+            return "VirusTotal: quota API atteint, resultat externe indisponible."
+        if not (200 <= response.status_code < 300):
+            return f"VirusTotal: erreur API {response.status_code}, resultat externe indisponible."
+        data = response.json().get("data", {})
+        attrs = data.get("attributes", {}) if isinstance(data, dict) else {}
+        stats = attrs.get("last_analysis_stats", {}) if isinstance(attrs, dict) else {}
+        malicious = int(stats.get("malicious") or 0)
+        suspicious = int(stats.get("suspicious") or 0)
+        harmless = int(stats.get("harmless") or 0)
+        undetected = int(stats.get("undetected") or 0)
+        timeout = int(stats.get("timeout") or 0)
+        names = attrs.get("names") or []
+        type_description = attrs.get("type_description") or attrs.get("type_tag") or "inconnu"
+        reputation = attrs.get("reputation", "indisponible")
+        threat = attrs.get("popular_threat_classification") or {}
+        suggested = threat.get("suggested_threat_label") or "aucun nom de menace populaire"
+        lines = [
+            "VirusTotal: rapport trouve par hash SHA-256, sans upload du fichier.",
+            f"- Detections: {malicious} malveillant, {suspicious} suspect, {harmless} inoffensif, {undetected} non detecte, {timeout} timeout.",
+            f"- Type VirusTotal: {type_description}",
+            f"- Reputation: {reputation}",
+            f"- Classification: {suggested}",
+        ]
+        if names:
+            lines.append("- Noms vus: " + ", ".join(str(name)[:80] for name in names[:5]))
+        return "\n".join(lines)
+    except Exception as e:
+        return f"VirusTotal: verification impossible ({str(e)[:140]})."
+
+
+def static_analyze_discord_file(path, attachment):
+    filename = str(attachment.get("filename") or Path(path).name or "fichier")
+    declared_type = str(attachment.get("content_type") or "inconnu")
+    size = Path(path).stat().st_size
+    data = Path(path).read_bytes()
+    sample = data[:512 * 1024]
+    hashes = {
+        "MD5": hashlib.md5(data).hexdigest(),
+        "SHA-1": hashlib.sha1(data).hexdigest(),
+        "SHA-256": hashlib.sha256(data).hexdigest(),
+        "BLAKE2b-256": hashlib.blake2b(data, digest_size=32).hexdigest(),
+    }
+    signature = detect_file_signature(sample[:64], filename=filename)
+    lower_name = filename.lower()
+    suffix = Path(lower_name).suffix or "aucune"
+    entropy = shannon_entropy(data[:1024 * 1024])
+    text_profile = detect_text_profile(sample)
+    indicators = extract_file_indicators(sample)
+    executable_suffixes = {
+        ".exe", ".dll", ".scr", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jse",
+        ".jar", ".apk", ".sh", ".py", ".com", ".elf", ".so", ".dylib", ".app",
+    }
+    executable_signature = signature.startswith(("Executable", "Script", "Paquet Android", "Archive Java"))
+    executable_extension = suffix in executable_suffixes
+    suspicious = []
+    warnings = []
+    details = []
+    if executable_signature or executable_extension:
+        warnings.append("Fichier executable ou script: ne pas lancer sans sandbox/VM dediee.")
+    if suffix in {".docm", ".xlsm", ".pptm"}:
+        warnings.append("Document Office avec macros possibles.")
+    if sample.startswith(b"MZ") and suffix not in {".exe", ".dll", ".scr", ".msi", ".com"}:
+        suspicious.append("Signature Windows MZ mais extension non executable habituelle.")
+    if indicators["keywords"]:
+        suspicious.append("Mots/commandes sensibles trouves: " + ", ".join(indicators["keywords"][:10]))
+    if indicators["urls"]:
+        warnings.append("URL detectees dans l'echantillon lu.")
+    if entropy >= 7.2 and (executable_signature or executable_extension):
+        warnings.append("Entropie elevee sur un executable: possible packer, compression ou chiffrement.")
+
+    zip_report = None
+    pe_info = parse_pe_info(data) if sample.startswith(b"MZ") else {}
+    elf_info = parse_elf_info(data) if sample.startswith(b"\x7fELF") else {}
+    pdf_info = inspect_pdf_sample(sample) if sample.startswith(b"%PDF") else {}
+    if sample.startswith(b"PK\x03\x04"):
+        zip_report = inspect_zip_safely(path)
+        if zip_report.get("macro"):
+            warnings.append("Macros Office detectees dans l'archive OpenXML.")
+        risky_entries = zip_report.get("risky_entries") or []
+        if risky_entries:
+            suspicious.append("Archive contenant des fichiers executables/scripts: " + ", ".join(risky_entries[:6]))
+        if zip_report.get("path_traversal_entries"):
+            suspicious.append("Archive contenant des chemins dangereux de type traversal.")
+        if zip_report.get("encrypted_entries"):
+            warnings.append("Archive contenant des entrees chiffrees/protegees par mot de passe.")
+        if zip_report.get("uncompressed_size", 0) > max(10 * size, 100 * 1024 * 1024):
+            warnings.append("Archive avec forte expansion potentielle a l'extraction.")
+
+    if pdf_info:
+        if pdf_info.get("javascript_markers"):
+            suspicious.append(f"PDF contenant des marqueurs JavaScript ({pdf_info['javascript_markers']}).")
+        if pdf_info.get("open_action") or pdf_info.get("additional_actions"):
+            warnings.append("PDF avec action automatique potentielle (/OpenAction ou /AA).")
+        if pdf_info.get("embedded_files"):
+            warnings.append("PDF contenant potentiellement des fichiers embarques.")
+
+    if suspicious:
+        verdict = "Suspect"
+    elif warnings:
+        verdict = "Prudence"
+    else:
+        verdict = "Aucune menace evidente detectee statiquement"
+
+    strings = [] if zip_report else printable_ascii_strings(sample)
+    lines = [
+        "Analyse statique de fichier par J.A.R.V.I.S",
+        f"Fichier: {filename}",
+        f"Taille: {file_size_label(size)} ({size} octets)",
+        f"Type declare Discord: {declared_type}",
+        f"Type detecte: {signature}",
+        f"Extension: {suffix}",
+        f"Profil contenu: {text_profile}",
+        f"Entropie debut/fichier: {entropy:.2f}/8 ({entropy_label(entropy)})",
+        f"Octets debut: {sample[:16].hex(' ') if sample else 'vide'}",
+        f"Verdict: {verdict}",
+        "Securite: le fichier n'a pas ete execute, importe, lance, ni decompresse sur disque.",
+        "Empreintes:",
+        f"- MD5: {hashes['MD5']}",
+        f"- SHA-1: {hashes['SHA-1']}",
+        f"- SHA-256: {hashes['SHA-256']}",
+        f"- BLAKE2b-256: {hashes['BLAKE2b-256']}",
+    ]
+    vt_report = lookup_virustotal_file_hash(hashes["SHA-256"])
+    if vt_report:
+        lines.append(vt_report)
+    if pe_info:
+        lines.append("Details PE Windows:")
+        lines.append(f"- Architecture: {pe_info.get('machine', 'inconnue')}")
+        lines.append(f"- Sous-systeme: {pe_info.get('subsystem', 'inconnu')}")
+        lines.append(f"- Sections: {pe_info.get('sections', 'inconnu')}")
+        lines.append(f"- Horodatage compilation: {pe_info.get('timestamp', 'indisponible')}")
+        if pe_info.get("flags"):
+            lines.append("- Drapeaux: " + ", ".join(pe_info["flags"]))
+        for section in pe_info.get("section_details", [])[:8]:
+            lines.append(f"- Section {section['name']}: raw={section['raw_size']} virt={section['virtual_size']} entropie={section['entropy']}")
+    if elf_info:
+        lines.append("Details ELF Linux:")
+        for key in ["class", "endian", "type", "machine"]:
+            lines.append(f"- {key}: {elf_info.get(key, 'inconnu')}")
+    if sample.startswith(b"#!"):
+        first_line = sample.splitlines()[0].decode("utf-8", errors="replace")[:180]
+        lines.append("Details script:")
+        lines.append(f"- Shebang: {first_line}")
+    if pdf_info:
+        lines.append("Details PDF:")
+        lines.append(f"- JavaScript markers: {pdf_info.get('javascript_markers', 0)}")
+        lines.append(f"- OpenAction: {pdf_info.get('open_action', False)}")
+        lines.append(f"- Additional actions: {pdf_info.get('additional_actions', False)}")
+        lines.append(f"- Embedded files: {pdf_info.get('embedded_files', False)}")
+    if zip_report:
+        compressed = int(zip_report.get("compressed_size") or 0)
+        uncompressed = int(zip_report.get("uncompressed_size") or 0)
+        ratio = (uncompressed / compressed) if compressed else 0
+        lines.append(f"Archive: {zip_report.get('entry_count', 0)} entree(s) detectee(s), liste limitee a 80.")
+        lines.append(f"- Taille compressee declaree: {file_size_label(compressed)}")
+        lines.append(f"- Taille decompressee declaree: {file_size_label(uncompressed)}")
+        lines.append(f"- Ratio expansion: {ratio:.1f}x")
+        entries = zip_report.get("entries") or []
+        risky_entries = zip_report.get("risky_entries") or []
+        encrypted_entries = zip_report.get("encrypted_entries") or []
+        traversal_entries = zip_report.get("path_traversal_entries") or []
+        if risky_entries:
+            lines.append("Entrees risquees:")
+            lines.extend(f"- {entry}" for entry in risky_entries[:12])
+        if encrypted_entries:
+            lines.append("Entrees chiffrees:")
+            lines.extend(f"- {entry}" for entry in encrypted_entries[:8])
+        if traversal_entries:
+            lines.append("Chemins dangereux:")
+            lines.extend(f"- {entry}" for entry in traversal_entries[:8])
+        if zip_report.get("largest_entries"):
+            lines.append("Plus grosses entrees declarees:")
+            lines.extend(f"- {entry}" for entry in zip_report.get("largest_entries", [])[:5])
+        if entries:
+            lines.append("Exemples de contenu:")
+            lines.extend(f"- {entry}" for entry in entries[:12])
+    if indicators["urls"] or indicators["ipv4"] or indicators["domains"]:
+        lines.append("Indicateurs extraits du debut du fichier:")
+        if indicators["urls"]:
+            lines.append("- URL: " + ", ".join(indicators["urls"][:8]))
+        if indicators["ipv4"]:
+            lines.append("- IPv4: " + ", ".join(indicators["ipv4"][:8]))
+        if indicators["domains"]:
+            lines.append("- Domaines: " + ", ".join(indicators["domains"][:8]))
+    if warnings:
+        lines.append("Alertes:")
+        lines.extend(f"- {item}" for item in warnings[:10])
+    if suspicious:
+        lines.append("Signaux suspects:")
+        lines.extend(f"- {item}" for item in suspicious[:10])
+    if strings:
+        lines.append("Chaines lisibles trouvees dans le debut du fichier:")
+        lines.extend(f"- {item[:160]}" for item in strings[:10])
+    if details:
+        lines.append("Details supplementaires:")
+        lines.extend(f"- {item}" for item in details[:10])
+    lines.append("Limite: ce controle ne remplace pas un antivirus, une analyse EDR ou une execution en sandbox isolee.")
+    return "\n".join(lines)
+
+
+async def explain_discord_file_analysis(static_report):
+    report = str(static_report or "").strip()[:12000]
+    if not report:
+        return "Analyse impossible: aucun rapport statique disponible."
+    system_instruction = (
+        "Tu es J.A.R.V.I.S dans Discord. Tu expliques une analyse statique de fichier. "
+        "Tu dois rester prudent: ne jamais garantir qu'un fichier est sain. "
+        "Tu ne dois pas proposer d'executer le fichier sur la machine de l'utilisateur."
+    )
+    prompt = (
+        "Explique ce rapport en francais clair pour un utilisateur Discord.\n"
+        "Format attendu:\n"
+        "Verdict: une ligne prudente.\n"
+        "Ce que c'est: 1 a 3 phrases.\n"
+        "Risques: puces courtes.\n"
+        "Conseil: que faire avant d'ouvrir/lancer.\n\n"
+        "RAPPORT STATIQUE:\n"
+        f"{report}"
+    )
+    if client:
+        contents = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+        for model_name in MODELS_LIST:
+            try:
+                response = await gemini_generate_with_failover(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(system_instruction=system_instruction, temperature=0.1),
+                    timeout=18.0,
+                )
+                if response.text:
+                    return response.text.strip()
+            except Exception as e:
+                print(f"[DISCORD] Echec explication analyse fichier Gemini {model_name} : {e}")
+    return report
+
+
+async def process_discord_file_analysis_async(payload):
+    file_path = None
+    static_report = ""
+    filename = "analyse-fichier-jarvis.txt"
+    try:
+        attachment = extract_discord_slash_attachment(payload)
+        filename = str(attachment.get("filename") or filename) if attachment else filename
+        if not attachment:
+            result = "Ajoute un fichier a l'option `fichier` pour que J.A.R.V.I.S puisse l'analyser."
+        else:
+            size = int(attachment.get("size") or 0)
+            if size > 25 * 1024 * 1024:
+                result = "Fichier trop gros pour l'analyse statique Discord: limite 25 Mo."
+            else:
+                file_path = download_discord_media_attachment(attachment, prefix="discord_file_scan", max_size_mb=25)
+                if not file_path:
+                    result = "Je n'ai pas pu telecharger ce fichier pour l'analyser."
+                else:
+                    static_report = static_analyze_discord_file(file_path, attachment)
+                    result = await explain_discord_file_analysis(static_report)
+    except Exception as e:
+        print(f"[DISCORD] Erreur analyse fichier : {e}")
+        result = "Je n'ai pas pu analyser ce fichier pour le moment."
+    finally:
+        try:
+            if file_path and Path(file_path).exists():
+                Path(file_path).unlink()
+        except Exception:
+            pass
+
+    if static_report and (len(static_report) > 1700 or static_report.strip() != str(result or "").strip()):
+        sent = post_discord_text_attachment_followup(
+            payload.get("application_id"),
+            payload.get("token"),
+            str(result or "Analyse fichier terminee.").strip() + "\n\nRapport statique complet joint en fichier texte.",
+            f"analyse-jarvis-{Path(filename).stem}.txt",
+            static_report,
+            flags=64,
+        )
+        if sent:
+            return
+    post_discord_followup(payload.get("application_id"), payload.get("token"), result, flags=64)
+
+
+def process_discord_file_analysis(payload):
+    asyncio.run(process_discord_file_analysis_async(payload))
+
+
 def trim_discord_content(content, limit=1900):
     safe_content = str(content or "").strip()
     if len(safe_content) > limit:
@@ -1170,6 +1771,38 @@ async def generate_discord_summary_mp3(summary):
     communicate = edge_tts.Communicate(text_to_speak, voice=JARVIS_TTS_VOICE)
     await communicate.save(str(output_file))
     return output_file
+
+
+def post_discord_text_attachment_followup(application_id, interaction_token, content, filename, text, flags=64):
+    app_id = str(application_id or DISCORD_CLIENT_ID or "").strip()
+    token = str(interaction_token or "").strip()
+    if not app_id or not token:
+        print("[DISCORD] Followup fichier impossible : application_id ou token manquant")
+        return False
+    safe_content = trim_discord_content(content or "Analyse fichier terminee.", limit=1700)
+    payload = {
+        "content": safe_content,
+        "allowed_mentions": {"parse": []},
+    }
+    if flags is not None:
+        payload["flags"] = flags
+    safe_filename = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(filename or "analyse-fichier-jarvis.txt"))[:80]
+    if not safe_filename.endswith(".txt"):
+        safe_filename += ".txt"
+    data = str(text or "").encode("utf-8", errors="replace")
+    try:
+        response = requests.post(
+            f"https://discord.com/api/v10/webhooks/{app_id}/{token}",
+            data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+            files={"files[0]": (safe_filename, io.BytesIO(data), "text/plain; charset=utf-8")},
+            timeout=30,
+        )
+        if 200 <= response.status_code < 300:
+            return True
+        print(f"[DISCORD] Echec followup fichier {response.status_code}: {response.text[:500]}")
+    except Exception as e:
+        print(f"[DISCORD] Erreur followup fichier : {e}")
+    return False
 
 
 def post_discord_followup(application_id, interaction_token, content, summary_id="", audio_path=None, audio_bytes=None, flags=64):
@@ -7149,6 +7782,13 @@ def start_http_interface_server():
         command_type = data.get("type")
         if interaction_type == 2 and command_type == 3:
             threading.Thread(target=process_discord_message_summary, args=(payload,), daemon=True).start()
+            return jsonify({
+                "type": 5,
+                "data": {"flags": 64},
+            })
+
+        if interaction_type == 2 and command_type == 1 and str(data.get("name") or "") == DISCORD_FILE_ANALYSIS_COMMAND_NAME:
+            threading.Thread(target=process_discord_file_analysis, args=(payload,), daemon=True).start()
             return jsonify({
                 "type": 5,
                 "data": {"flags": 64},

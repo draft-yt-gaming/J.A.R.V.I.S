@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 SETTINGS_FILE = BASE_DIR / "jarvis_runtime_settings.json"
-COMMAND_NAME = "Resumer avec J.A.R.V.I.S"
+SUMMARY_COMMAND_NAME = "Resumer avec J.A.R.V.I.S"
+FILE_ANALYSIS_COMMAND_NAME = "analyser-fichier"
 API_BASE = "https://discord.com/api/v10"
 
 
@@ -44,27 +45,50 @@ def main():
     if not application_id or not bot_token:
         raise SystemExit("DISCORD_CLIENT_ID et DISCORD_BOT_TOKEN sont requis dans .env ou le dashboard J.A.R.V.I.S.")
 
-    command_payload = {
-        "name": COMMAND_NAME,
-        "type": 3,
-        "integration_types": [0, 1],
-        "contexts": [0, 1, 2],
-    }
+    command_payloads = [
+        {
+            "name": SUMMARY_COMMAND_NAME,
+            "type": 3,
+            "integration_types": [0, 1],
+            "contexts": [0, 1, 2],
+        },
+        {
+            "name": FILE_ANALYSIS_COMMAND_NAME,
+            "description": "Analyse statique prudente d'un fichier sans l'executer",
+            "type": 1,
+            "integration_types": [0, 1],
+            "contexts": [0, 1, 2],
+            "options": [
+                {
+                    "name": "fichier",
+                    "description": "Fichier a analyser sans execution",
+                    "type": 11,
+                    "required": True,
+                }
+            ],
+        },
+    ]
     commands_url = f"{API_BASE}/applications/{application_id}/commands"
     commands = discord_request("GET", commands_url, bot_token)
-    existing = next((cmd for cmd in commands if cmd.get("name") == COMMAND_NAME and cmd.get("type") == 3), None)
 
-    if existing:
-        command = discord_request("PATCH", f"{commands_url}/{existing['id']}", bot_token, json=command_payload)
-        action = "mise a jour"
-    else:
-        command = discord_request("POST", commands_url, bot_token, json=command_payload)
-        action = "cree"
+    for command_payload in command_payloads:
+        existing = next(
+            (cmd for cmd in commands if cmd.get("name") == command_payload["name"] and cmd.get("type") == command_payload["type"]),
+            None,
+        )
+        if existing:
+            command = discord_request("PATCH", f"{commands_url}/{existing['id']}", bot_token, json=command_payload)
+            action = "mise a jour"
+        else:
+            command = discord_request("POST", commands_url, bot_token, json=command_payload)
+            action = "cree"
+        print(f"Commande Discord {action}: {command.get('name')} ({command.get('id')})")
 
-    print(f"Commande Discord {action}: {command.get('name')} ({command.get('id')})")
     print("Endpoint a configurer dans Discord Developer Portal:")
     print("  https://TON_DOMAINE/api/discord/interactions")
-    print("Ensuite: clic droit sur un message -> Applications -> Resumer avec J.A.R.V.I.S.")
+    print("Ensuite:")
+    print("  - clic droit sur un message -> Applications -> Resumer avec J.A.R.V.I.S")
+    print("  - /analyser-fichier fichier:<piece jointe> pour une analyse statique prudente")
 
 
 if __name__ == "__main__":

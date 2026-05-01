@@ -381,6 +381,7 @@ Jarvis separe les APIs specialisees des fournisseurs IA. Les APIs publiques ci-d
 | Emby | Bibliotheque media personnelle | Oui | `EMBY_URL`, `EMBY_API_KEY`, puis `EMBY_USER_ID` ou `EMBY_USERNAME` |
 | Discord OAuth | Protection du dashboard administrateur | Oui | `DISCORD_OWNER_ID`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI` |
 | Discord Applications | Clic droit sur un message Discord puis resume par Jarvis | Oui | `DISCORD_CLIENT_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN` |
+| VirusTotal | Enrichissement optionnel de l'analyse fichier Discord par recherche de hash | Non | `VIRUSTOTAL_API_KEY` |
 | Blagues API | Blagues externes si configure | Oui | `BLAGUES_API_TOKEN` |
 
 Exemples APIs publiques : `meteo demain a Paris`, `jours feries en France`, `wikipedia Nikola Tesla`, `nutriscore coca cola`, `isbn 9782070368228`, `image nasa du jour`, `coordonnees de la tour eiffel`.
@@ -440,6 +441,8 @@ https://jarvis.drafthome.fr/api/discord/interactions
 ```
 
 La commande est globale et peut etre installee sur un serveur ou comme application utilisateur Discord. Elle peut resumer un message texte, un message vocal/audio, une image ou une video : J.A.R.V.I.S tente alors une transcription francaise, analyse les images jointes et, pour les videos, extrait quelques images cles pour decrire ce que la personne montre ou fait avant le resume. Le resume est d'abord renvoye en message ephemere, visible seulement par la personne qui a clique, avec un fichier MP3 genere par la meme voix que J.A.R.V.I.S. Le bouton `Montrer` sous le resume permet ensuite de publier ce resume et son MP3 dans le salon pour tout le monde.
+
+Une commande slash `/analyser-fichier` ajoute aussi une analyse statique prudente d'une piece jointe generique jusqu'a 25 Mo. Elle calcule MD5/SHA-1/SHA-256/BLAKE2b, detecte les signatures courantes (PE/ELF/Mach-O, scripts, PDF, ZIP/JAR/APK, Office), mesure l'entropie, extrait des URL/IP/domaines et mots sensibles, detaille les executables PE/ELF, inspecte les PDF et liste les entrees dangereuses d'une archive ZIP sans l'extraire sur disque. Si `VIRUSTOTAL_API_KEY` est configuree, J.A.R.V.I.S interroge aussi VirusTotal par hash SHA-256 uniquement, sans envoyer le fichier. Quand le rapport est trop long pour Discord, il joint le rapport statique complet en fichier `.txt`. Par securite, J.A.R.V.I.S ne lance jamais le fichier, ne l'importe pas, ne l'execute pas et ne le decompresse pas pour verification. Le verdict reste volontairement prudent : aucune analyse statique ne peut garantir qu'un executable est sain.
 
 ## Dashboard et securite
 
