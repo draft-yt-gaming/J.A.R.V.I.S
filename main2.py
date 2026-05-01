@@ -795,8 +795,101 @@ def extract_discord_target_message(payload):
         "guild_id": guild_id,
         "author": author,
         "content": content,
+        "attachments": attachments if isinstance(attachments, list) else [],
         "jump_url": jump_url,
     }
+
+
+def discord_attachment_is_audio(attachment):
+    if not isinstance(attachment, dict):
+        return False
+    content_type = str(attachment.get("content_type") or "").lower()
+    filename = str(attachment.get("filename") or "").lower()
+    if content_type.startswith("audio/"):
+        return True
+    return filename.endswith((".ogg", ".oga", ".opus", ".mp3", ".m4a", ".wav", ".webm", ".aac"))
+
+
+def download_discord_audio_attachment(attachment):
+    url = str(attachment.get("url") or attachment.get("proxy_url") or "").strip()
+    if not url:
+        return None
+    size = int(attachment.get("size") or 0)
+    if size > 25 * 1024 * 1024:
+        print(f"[DISCORD] Audio ignore, fichier trop gros : {size} octets")
+        return None
+    filename = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(attachment.get("filename") or "voice.ogg"))[:80]
+    suffix = Path(filename).suffix or ".ogg"
+    input_path = BASE_DIR / f"discord_voice_{int(time.time() * 1000)}_{secrets.token_hex(4)}{suffix}"
+    try:
+        with requests.get(url, timeout=20, stream=True) as response:
+            response.raise_for_status()
+            total = 0
+            with open(input_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > 25 * 1024 * 1024:
+                        raise ValueError("audio_too_large")
+                    f.write(chunk)
+        return input_path
+    except Exception as e:
+        print(f"[DISCORD] Erreur telechargement audio : {e}")
+        try:
+            if input_path.exists():
+                input_path.unlink()
+        except Exception:
+            pass
+    return None
+
+
+def transcribe_audio_file_fr(input_path):
+    wav_path = BASE_DIR / f"discord_voice_{int(time.time() * 1000)}_{secrets.token_hex(4)}.wav"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(input_path), "-ar", "16000", "-ac", "1", str(wav_path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(str(wav_path)) as source:
+            audio = recognizer.record(source)
+        return recognizer.recognize_google(audio, language="fr-FR").strip()
+    finally:
+        try:
+            if wav_path.exists():
+                wav_path.unlink()
+        except Exception:
+            pass
+
+
+def transcribe_discord_audio_attachments(attachments):
+    transcripts = []
+    for attachment in attachments[:3]:
+        if not discord_attachment_is_audio(attachment):
+            continue
+        input_path = download_discord_audio_attachment(attachment)
+        if not input_path:
+            continue
+        try:
+            transcript = transcribe_audio_file_fr(input_path)
+            if transcript:
+                name = str(attachment.get("filename") or "message vocal")
+                transcripts.append(f"{name}: {transcript}")
+        except sr.UnknownValueError:
+            print("[DISCORD] Audio non compris par la reconnaissance vocale")
+        except Exception as e:
+            print(f"[DISCORD] Erreur transcription audio : {e}")
+        finally:
+            try:
+                if input_path.exists():
+                    input_path.unlink()
+            except Exception:
+                pass
+    return transcripts
 
 
 def trim_discord_content(content, limit=1900):
@@ -939,9 +1032,15 @@ async def process_discord_message_summary_async(payload):
     audio_path = None
     try:
         target = extract_discord_target_message(payload)
+        message_content = target["content"]
+        voice_transcripts = transcribe_discord_audio_attachments(target.get("attachments", []))
+        if voice_transcripts:
+            message_content = (message_content + "\n\nTranscription vocale:\n" + "\n".join(voice_transcripts)).strip()
+        elif any(discord_attachment_is_audio(attachment) for attachment in target.get("attachments", [])) and not message_content.strip():
+            message_content = "Message vocal present, mais J.A.R.V.I.S n'a pas reussi a le transcrire."
         summary = await resumer_message_discord(
             author=target["author"],
-            content=target["content"],
+            content=message_content,
             jump_url=target["jump_url"],
         )
         try:
