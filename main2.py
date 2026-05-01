@@ -94,7 +94,6 @@ COMMAND_HTTP_CLIENT_ID = ContextVar("jarvis_http_client_id", default="")
 DISCORD_SUMMARY_CACHE = {}
 DISCORD_SUMMARY_CACHE_LOCK = threading.Lock()
 DISCORD_SUMMARY_CACHE_TTL = 15 * 60
-DISCORD_FILE_ANALYSIS_COMMAND_NAME = "analyser-fichier"
 DISCORD_FILE_CONTEXT_COMMAND_NAME = "Verifier avec J.A.R.V.I.S"
 
 
@@ -1668,10 +1667,6 @@ async def explain_discord_file_analysis(static_report):
 
 def extract_discord_file_analysis_attachment(payload):
     data = payload.get("data", {}) if isinstance(payload, dict) else {}
-    command_type = data.get("type") if isinstance(data, dict) else None
-    if command_type == 1:
-        return extract_discord_slash_attachment(payload), "Ajoute un fichier a l'option `fichier` pour que J.A.R.V.I.S puisse l'analyser."
-
     target = extract_discord_target_message(payload)
     attachments = target.get("attachments", [])
     if not attachments:
@@ -7801,13 +7796,6 @@ def start_http_interface_server():
             command_name = str(data.get("name") or "")
             target = process_discord_file_analysis if command_name == DISCORD_FILE_CONTEXT_COMMAND_NAME else process_discord_message_summary
             threading.Thread(target=target, args=(payload,), daemon=True).start()
-            return jsonify({
-                "type": 5,
-                "data": {"flags": 64},
-            })
-
-        if interaction_type == 2 and command_type == 1 and str(data.get("name") or "") == DISCORD_FILE_ANALYSIS_COMMAND_NAME:
-            threading.Thread(target=process_discord_file_analysis, args=(payload,), daemon=True).start()
             return jsonify({
                 "type": 5,
                 "data": {"flags": 64},
