@@ -901,17 +901,17 @@ def post_discord_followup(application_id, interaction_token, content, summary_id
     return False
 
 
-def build_public_discord_summary_response(payload, summary_id):
+def publish_discord_summary_from_button(payload, summary_id):
     cached = get_cached_discord_summary(summary_id)
     if not cached:
-        return {
-            "type": 4,
-            "data": {
-                "content": "Ce resume n'est plus disponible. Redemande un resume du message puis appuie sur Montrer.",
-                "flags": 64,
-                "allowed_mentions": {"parse": []},
-            },
-        }
+        post_discord_followup(
+            payload.get("application_id"),
+            payload.get("token"),
+            "Ce resume n'est plus disponible. Redemande un resume du message puis appuie sur Montrer.",
+            flags=64,
+        )
+        return
+
     summary = str(cached.get("summary") or "").strip()
     audio_bytes = cached.get("audio_bytes") or b""
     published = post_discord_followup(
@@ -921,24 +921,18 @@ def build_public_discord_summary_response(payload, summary_id):
         audio_bytes=audio_bytes,
         flags=None,
     )
-    if published:
-        return {
-            "type": 7,
-            "data": {
-                "content": trim_discord_content(f"{summary}\n\nResume publie dans le salon avec le MP3."),
-                "flags": 64,
-                "components": [],
-                "allowed_mentions": {"parse": []},
-            },
-        }
-    return {
-        "type": 4,
-        "data": {
-            "content": "Je n'ai pas pu publier le resume et le MP3 dans le salon pour le moment.",
-            "flags": 64,
-            "allowed_mentions": {"parse": []},
-        },
-    }
+    if not published:
+        post_discord_followup(
+            payload.get("application_id"),
+            payload.get("token"),
+            "Je n'ai pas pu publier le resume et le MP3 dans le salon pour le moment.",
+            flags=64,
+        )
+
+
+def build_deferred_discord_component_response(payload, summary_id):
+    threading.Thread(target=publish_discord_summary_from_button, args=(payload, summary_id), daemon=True).start()
+    return {"type": 6}
 
 
 async def process_discord_message_summary_async(payload):
@@ -6834,7 +6828,7 @@ def start_http_interface_server():
         if interaction_type == 3:
             custom_id = str(data.get("custom_id") or "")
             if custom_id.startswith("jarvis_show_summary:"):
-                return jsonify(build_public_discord_summary_response(payload, custom_id.split(":", 1)[1]))
+                return jsonify(build_deferred_discord_component_response(payload, custom_id.split(":", 1)[1]))
 
         return jsonify({
             "type": 4,
