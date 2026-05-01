@@ -48,11 +48,12 @@ type ServiceHealth = {
 
 type AuthStatus = {
   authenticated: boolean;
-  user: { id: string; username?: string; global_name?: string } | null;
+  user: { id?: string; username?: string; global_name?: string } | null;
   assistant_name: string;
   login_url: string;
   logout_url: string;
   discord_configured: boolean;
+  local_auth?: boolean;
   config_flags: Record<string, boolean>;
   service_health: Record<string, ServiceHealth>;
   ws_auth_token?: string;
@@ -95,6 +96,8 @@ const DASHBOARD_FIELDS: DashboardField[] = [
   { key: "SERPAPI_API_KEY", label: "SerpAPI Key", type: "password", section: "Services" },
   { key: "NASA_API_KEY", label: "NASA API Key", type: "password", section: "Services", placeholder: "Optionnel, DEMO_KEY sinon" },
   { key: "VIRUSTOTAL_API_KEY", label: "VirusTotal API Key", type: "password", section: "Services", placeholder: "Optionnel, recherche par hash uniquement" },
+  { key: "DASHBOARD_USERNAME", label: "Login dashboard", type: "text", section: "Securite", placeholder: "admin" },
+  { key: "DASHBOARD_PASSWORD", label: "Mot de passe dashboard", type: "password", section: "Securite", placeholder: "Laisser vide pour ne pas changer" },
   { key: "HA_URL", label: "Home Assistant URL", type: "url", section: "Home Assistant", placeholder: "http://192.168.x.x:8123" },
   { key: "HA_TOKEN", label: "Home Assistant Token", type: "password", section: "Home Assistant" },
   { key: "PROXMOX_URL", label: "Proxmox URL", type: "url", section: "Proxmox", placeholder: "https://192.168.x.x:8006" },
@@ -150,6 +153,9 @@ const musicPauseButtonEl = document.getElementById("music-pause-button") as HTML
 const musicStopButtonEl = document.getElementById("music-stop-button") as HTMLButtonElement;
 const dashboardFieldsEl = document.getElementById("dashboard-fields") as HTMLDivElement;
 const dashboardFormEl = document.getElementById("dashboard-form") as HTMLFormElement;
+const dashboardLoginFormEl = document.getElementById("dashboard-login-form") as HTMLDivElement;
+const dashboardLoginUsernameEl = document.getElementById("dashboard-login-username") as HTMLInputElement;
+const dashboardLoginPasswordEl = document.getElementById("dashboard-login-password") as HTMLInputElement;
 const dashboardLoginEl = document.getElementById("dashboard-login") as HTMLButtonElement;
 const dashboardLogoutEl = document.getElementById("dashboard-logout") as HTMLButtonElement;
 const dashboardSaveEl = document.getElementById("dashboard-save") as HTMLButtonElement;
@@ -1168,11 +1174,9 @@ async function fetchAuthStatus(): Promise<AuthStatus | null> {
     renderDashboardSummary(data, data.service_health || {});
     renderConfigFlags(data.service_health || {});
     dashboardAuthStatusEl.textContent = data.authenticated
-      ? `Connecte en tant que ${data.user?.global_name || data.user?.username || "owner"}`
-      : (data.discord_configured
-          ? "Dashboard protege par Discord. Connecte-toi pour modifier les reglages."
-          : "Discord n'est pas encore configure sur le serveur.");
-    dashboardLoginEl.style.display = data.authenticated || !data.discord_configured ? "none" : "inline-flex";
+      ? `Connecte en tant que ${data.user?.username || "admin"}`
+      : "Dashboard protege par login local. Identifiants par defaut : admin / admin.";
+    dashboardLoginFormEl.style.display = data.authenticated ? "none" : "grid";
     dashboardLogoutEl.style.display = data.authenticated ? "inline-flex" : "none";
     dashboardSaveEl.style.display = data.authenticated ? "inline-flex" : "none";
     if (!data.authenticated) {
@@ -1224,7 +1228,7 @@ async function saveDashboardSettings(): Promise<void> {
   });
   if (response.status === 401) {
     setDashboardBusy(false);
-    showError("Connexion Discord requise");
+    showError("Connexion dashboard requise");
     await fetchAuthStatus();
     return;
   }
@@ -1273,10 +1277,7 @@ function handleUrlFeedback(): void {
 
   if (error) {
     const messages: Record<string, string> = {
-      discord_non_configure: "Discord n'est pas configure sur le serveur.",
-      discord_state_invalide: "Retour Discord invalide.",
-      discord_oauth_echec: "Connexion Discord echouee.",
-      discord_acces_refuse: "Cet utilisateur Discord n'est pas autorise.",
+      login_invalide: "Login ou mot de passe incorrect.",
     };
     showError(messages[error] || "Erreur Discord");
   }
@@ -1414,8 +1415,33 @@ dashboardPanelEl.addEventListener("click", (event) => {
   }
 });
 
+async function loginDashboard(): Promise<void> {
+  const username = dashboardLoginUsernameEl.value.trim();
+  const password = dashboardLoginPasswordEl.value;
+  const response = await fetch("/auth/login", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!response.ok) {
+    showError("Login ou mot de passe incorrect");
+    return;
+  }
+  dashboardLoginPasswordEl.value = "";
+  await fetchAuthStatus();
+  await loadDashboardSettings();
+}
+
 dashboardLoginEl.addEventListener("click", () => {
-  window.location.href = "/auth/discord/login";
+  void loginDashboard().catch(() => showError("Connexion impossible"));
+});
+
+dashboardLoginPasswordEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void loginDashboard().catch(() => showError("Connexion impossible"));
+  }
 });
 
 dashboardLogoutEl.addEventListener("click", () => {
@@ -1431,7 +1457,7 @@ dashboardFormEl.addEventListener("submit", (event) => {
 
 dashboardDebugToggleEl.addEventListener("click", () => {
   if (!authStatus?.authenticated) {
-    showError("Connexion Discord requise");
+    showError("Connexion dashboard requise");
     return;
   }
   debugModeEnabled = !debugModeEnabled;

@@ -39,10 +39,12 @@ import hashlib
 import struct
 import mimetypes
 import zipfile
+import tarfile
 from functools import wraps
 from contextvars import ContextVar
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from flask import Flask, Response, jsonify, redirect, request as flask_request, send_from_directory, session
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 try:
     import cv2
@@ -183,6 +185,9 @@ DEFAULT_SETTINGS = {
     "GROQ_API_KEY": os.getenv("GROQ_API_KEY", ""),
     "NASA_API_KEY": os.getenv("NASA_API_KEY", ""),
     "VIRUSTOTAL_API_KEY": os.getenv("VIRUSTOTAL_API_KEY", ""),
+    "DASHBOARD_USERNAME": os.getenv("DASHBOARD_USERNAME", "admin"),
+    "DASHBOARD_PASSWORD": "",
+    "DASHBOARD_PASSWORD_HASH": os.getenv("DASHBOARD_PASSWORD_HASH", ""),
     "OLLAMA_ENABLED": os.getenv("OLLAMA_ENABLED", "false"),
     "OLLAMA_PREFER_LOCAL": os.getenv("OLLAMA_PREFER_LOCAL", "false"),
     "OLLAMA_URL": os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"),
@@ -216,6 +221,8 @@ SENSITIVE_SETTINGS = {
     "GROQ_API_KEY",
     "NASA_API_KEY",
     "VIRUSTOTAL_API_KEY",
+    "DASHBOARD_PASSWORD",
+    "DASHBOARD_PASSWORD_HASH",
     "EMBY_API_KEY",
     "PROXMOX_TOKEN_SECRET",
     "DISCORD_CLIENT_SECRET",
@@ -271,6 +278,8 @@ SERPAPI_API_KEY = ""
 GROQ_API_KEY = ""
 NASA_API_KEY = ""
 VIRUSTOTAL_API_KEY = ""
+DASHBOARD_USERNAME = "admin"
+DASHBOARD_PASSWORD_HASH = ""
 OLLAMA_ENABLED = False
 OLLAMA_PREFER_LOCAL = False
 OLLAMA_URL = "http://127.0.0.1:11434"
@@ -315,6 +324,7 @@ app = None
 def refresh_runtime_config():
     global ASSISTANT_NAME, GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_MODEL_KEY_BLOCKED_UNTIL, BLAGUES_API_TOKEN, YOUTUBE_API_KEY, XAI_API_KEY
     global HA_URL, HA_TOKEN, HA_WEATHER_ENTITY, HOME_LOCATION_NAME, SERPAPI_API_KEY, GROQ_API_KEY, NASA_API_KEY, VIRUSTOTAL_API_KEY
+    global DASHBOARD_USERNAME, DASHBOARD_PASSWORD_HASH
     global OLLAMA_ENABLED, OLLAMA_PREFER_LOCAL, OLLAMA_URL, OLLAMA_MODELS
     global EMBY_URL, EMBY_API_KEY, EMBY_USER_ID, EMBY_USERNAME
     global PROXMOX_URL, PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_VERIFY_SSL
@@ -338,6 +348,8 @@ def refresh_runtime_config():
     GROQ_API_KEY = settings.get("GROQ_API_KEY", "")
     NASA_API_KEY = settings.get("NASA_API_KEY", "")
     VIRUSTOTAL_API_KEY = str(settings.get("VIRUSTOTAL_API_KEY", "")).strip()
+    DASHBOARD_USERNAME = str(settings.get("DASHBOARD_USERNAME", "admin") or "admin").strip() or "admin"
+    DASHBOARD_PASSWORD_HASH = str(settings.get("DASHBOARD_PASSWORD_HASH", "")).strip()
     OLLAMA_ENABLED = str(settings.get("OLLAMA_ENABLED", "false")).strip().lower() in ("1", "true", "yes", "on")
     OLLAMA_PREFER_LOCAL = str(settings.get("OLLAMA_PREFER_LOCAL", "false")).strip().lower() in ("1", "true", "yes", "on")
     OLLAMA_URL = str(settings.get("OLLAMA_URL", "http://127.0.0.1:11434")).strip().rstrip("/") or "http://127.0.0.1:11434"
@@ -403,8 +415,17 @@ def save_runtime_settings(updated_settings):
     global RUNTIME_SETTINGS
     settings = dict(RUNTIME_SETTINGS)
     for key, value in updated_settings.items():
-        if key in SETTINGS_FIELDS:
-            settings[key] = _normalize_setting_value(value)
+        if key not in SETTINGS_FIELDS:
+            continue
+        if key == "DASHBOARD_PASSWORD":
+            password = str(value or "").strip()
+            if password:
+                settings["DASHBOARD_PASSWORD_HASH"] = generate_password_hash(password)
+            settings["DASHBOARD_PASSWORD"] = ""
+            continue
+        if key == "DASHBOARD_PASSWORD_HASH":
+            continue
+        settings[key] = _normalize_setting_value(value)
     SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     RUNTIME_SETTINGS = settings
     refresh_runtime_config()
@@ -652,6 +673,8 @@ def get_private_runtime_settings():
         "GROQ_API_KEY": GROQ_API_KEY,
         "NASA_API_KEY": NASA_API_KEY,
         "VIRUSTOTAL_API_KEY": VIRUSTOTAL_API_KEY,
+        "DASHBOARD_USERNAME": DASHBOARD_USERNAME,
+        "DASHBOARD_PASSWORD": "",
         "OLLAMA_ENABLED": OLLAMA_ENABLED,
         "OLLAMA_PREFER_LOCAL": OLLAMA_PREFER_LOCAL,
         "OLLAMA_URL": OLLAMA_URL,
@@ -722,9 +745,23 @@ def request_from_private_network():
         return False
     return ip.is_private or ip.is_loopback
 
+def dashboard_password_valid(username, password):
+    expected_user = str(DASHBOARD_USERNAME or "admin").strip() or "admin"
+    if not secrets.compare_digest(str(username or ""), expected_user):
+        return False
+    password = str(password or "")
+    if DASHBOARD_PASSWORD_HASH:
+        try:
+            return check_password_hash(DASHBOARD_PASSWORD_HASH, password)
+        except Exception as e:
+            print(f"[AUTH] Hash dashboard invalide : {e}")
+            return False
+    return secrets.compare_digest(password, "admin")
+
+
 def is_owner_authenticated():
-    user = session.get("discord_user")
-    return bool(user and str(user.get("id")) == DISCORD_OWNER_ID)
+    user = session.get("dashboard_user")
+    return bool(user and str(user.get("username") or "") == str(DASHBOARD_USERNAME or "admin"))
 
 def owner_auth_required():
     def decorator(func):
@@ -1205,6 +1242,35 @@ def detect_file_signature(sample, filename=""):
     return "Type inconnu ou donnees binaires generiques"
 
 
+def archive_entry_safety(name, size=0, encrypted=False, traversal=False):
+    lower = str(name or "").lower()
+    suffix = Path(lower).suffix
+    risky_suffixes = {
+        ".exe", ".dll", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jse",
+        ".msi", ".jar", ".apk", ".sh", ".py", ".pl", ".rb", ".elf", ".so", ".dylib",
+    }
+    reasons = []
+    verdict = "OK"
+    if traversal:
+        verdict = "DANGEREUX"
+        reasons.append("chemin traversal")
+    if suffix in risky_suffixes:
+        verdict = "SUSPECT" if verdict == "OK" else verdict
+        reasons.append("extension executable/script")
+    if lower.endswith("vbaproject.bin") or "/macros/" in lower:
+        verdict = "SUSPECT" if verdict == "OK" else verdict
+        reasons.append("macro Office")
+    if encrypted:
+        verdict = "PRUDENCE" if verdict == "OK" else verdict
+        reasons.append("entree chiffree")
+    if int(size or 0) > 100 * 1024 * 1024:
+        verdict = "PRUDENCE" if verdict == "OK" else verdict
+        reasons.append("tres gros fichier")
+    if not reasons:
+        reasons.append("aucun indicateur evident")
+    return {"name": str(name or "")[:160], "size": int(size or 0), "verdict": verdict, "reasons": reasons}
+
+
 def inspect_zip_safely(path, max_entries=80):
     report = {
         "entries": [],
@@ -1235,14 +1301,17 @@ def inspect_zip_safely(path, max_entries=80):
                 report["entries"].append(name[:160])
                 lower = name.lower()
                 parts = Path(lower).parts
-                if lower.startswith(("/", "\\")) or ".." in parts:
+                traversal = lower.startswith(("/", "\\")) or ".." in parts
+                encrypted = bool(info.flag_bits & 0x1)
+                if traversal:
                     report["path_traversal_entries"].append(name[:160])
-                if info.flag_bits & 0x1:
+                if encrypted:
                     report["encrypted_entries"].append(name[:160])
                 if lower.endswith("vbaproject.bin") or "/macros/" in lower:
                     report["macro"] = True
                 if Path(lower).suffix in risky_suffixes:
                     report["risky_entries"].append(name[:160])
+                report.setdefault("entry_assessments", []).append(archive_entry_safety(name, info.file_size, encrypted=encrypted, traversal=traversal))
     except Exception as e:
         report["errors"].append(str(e)[:180])
     return report
@@ -1336,6 +1405,41 @@ def extract_file_indicators(sample):
         if keyword.encode("ascii", errors="ignore").lower() in sample.lower():
             keywords.append(keyword)
     return {"urls": urls, "ipv4": ipv4, "domains": domains, "keywords": keywords}
+
+
+def inspect_tar_safely(path, max_entries=80):
+    report = {
+        "entries": [],
+        "entry_count": 0,
+        "risky_entries": [],
+        "path_traversal_entries": [],
+        "uncompressed_size": 0,
+        "largest_entries": [],
+        "entry_assessments": [],
+        "errors": [],
+    }
+    try:
+        with tarfile.open(path) as tf:
+            members = tf.getmembers()
+            report["entry_count"] = len(members)
+            report["uncompressed_size"] = sum(max(0, int(member.size or 0)) for member in members if member.isfile())
+            largest = sorted([m for m in members if m.isfile()], key=lambda item: int(item.size or 0), reverse=True)[:5]
+            report["largest_entries"] = [f"{member.name[:120]} ({file_size_label(member.size)})" for member in largest]
+            for member in members[:max_entries]:
+                name = str(member.name or "")
+                lower = name.lower()
+                parts = Path(lower).parts
+                traversal = lower.startswith(("/", "\\")) or ".." in parts
+                report["entries"].append(name[:160])
+                if traversal:
+                    report["path_traversal_entries"].append(name[:160])
+                assessment = archive_entry_safety(name, member.size if member.isfile() else 0, traversal=traversal)
+                if assessment["verdict"] in ("SUSPECT", "DANGEREUX"):
+                    report["risky_entries"].append(name[:160])
+                report["entry_assessments"].append(assessment)
+    except Exception as e:
+        report["errors"].append(str(e)[:180])
+    return report
 
 
 def parse_pe_info(data):
@@ -1514,6 +1618,7 @@ def static_analyze_discord_file(path, attachment):
         warnings.append("Entropie elevee sur un executable: possible packer, compression ou chiffrement.")
 
     zip_report = None
+    tar_report = None
     pe_info = parse_pe_info(sample) if sample.startswith(b"MZ") else {}
     elf_info = parse_elf_info(sample) if sample.startswith(b"\x7fELF") else {}
     pdf_info = inspect_pdf_sample(sample) if sample.startswith(b"%PDF") else {}
@@ -1530,6 +1635,15 @@ def static_analyze_discord_file(path, attachment):
             warnings.append("Archive contenant des entrees chiffrees/protegees par mot de passe.")
         if zip_report.get("uncompressed_size", 0) > max(10 * size, 100 * 1024 * 1024):
             warnings.append("Archive avec forte expansion potentielle a l'extraction.")
+
+    if tarfile.is_tarfile(path):
+        tar_report = inspect_tar_safely(path)
+        if tar_report.get("risky_entries"):
+            suspicious.append("Archive TAR contenant des fichiers executables/scripts: " + ", ".join(tar_report.get("risky_entries", [])[:6]))
+        if tar_report.get("path_traversal_entries"):
+            suspicious.append("Archive TAR contenant des chemins dangereux de type traversal.")
+        if tar_report.get("uncompressed_size", 0) > max(10 * size, 100 * 1024 * 1024):
+            warnings.append("Archive TAR avec forte expansion potentielle a l'extraction.")
 
     if pdf_info:
         if pdf_info.get("javascript_markers"):
@@ -1616,9 +1730,29 @@ def static_analyze_discord_file(path, attachment):
         if zip_report.get("largest_entries"):
             lines.append("Plus grosses entrees declarees:")
             lines.extend(f"- {entry}" for entry in zip_report.get("largest_entries", [])[:5])
+        if zip_report.get("entry_assessments"):
+            lines.append("Evaluation des fichiers dans l'archive:")
+            for item in zip_report.get("entry_assessments", [])[:20]:
+                reason = ", ".join(item.get("reasons", []))
+                lines.append(f"- {item.get('verdict')}: {item.get('name')} ({file_size_label(item.get('size', 0))}) - {reason}")
         if entries:
             lines.append("Exemples de contenu:")
             lines.extend(f"- {entry}" for entry in entries[:12])
+    if tar_report:
+        uncompressed = int(tar_report.get("uncompressed_size") or 0)
+        lines.append(f"Archive TAR: {tar_report.get('entry_count', 0)} entree(s) detectee(s), liste limitee a 80.")
+        lines.append(f"- Taille decompressee declaree: {file_size_label(uncompressed)}")
+        if tar_report.get("largest_entries"):
+            lines.append("Plus grosses entrees declarees:")
+            lines.extend(f"- {entry}" for entry in tar_report.get("largest_entries", [])[:5])
+        if tar_report.get("entry_assessments"):
+            lines.append("Evaluation des fichiers dans l'archive:")
+            for item in tar_report.get("entry_assessments", [])[:20]:
+                reason = ", ".join(item.get("reasons", []))
+                lines.append(f"- {item.get('verdict')}: {item.get('name')} ({file_size_label(item.get('size', 0))}) - {reason}")
+        if tar_report.get("entries"):
+            lines.append("Exemples de contenu:")
+            lines.extend(f"- {entry}" for entry in tar_report.get("entries", [])[:12])
     if indicators["urls"] or indicators["ipv4"] or indicators["domains"]:
         lines.append("Indicateurs extraits du debut du fichier:")
         if indicators["urls"]:
@@ -2023,9 +2157,17 @@ def process_discord_message_summary(payload):
     asyncio.run(process_discord_message_summary_async(payload))
 
 
+def dashboard_user_is_owner(user):
+    if not isinstance(user, dict) or not user:
+        return False
+    if str(user.get("id", "")) == "local" and str(user.get("username", "")) == str(DASHBOARD_USERNAME or "admin"):
+        return True
+    return bool(DISCORD_OWNER_ID and str(user.get("id", "")) == DISCORD_OWNER_ID)
+
+
 def build_command_context(auth_user=None, client_id=""):
     user = auth_user or {}
-    owner = bool(user and str(user.get("id", "")) == DISCORD_OWNER_ID)
+    owner = dashboard_user_is_owner(user)
     return {
         "user": user if owner else None,
         "owner": owner,
@@ -2102,19 +2244,20 @@ def read_ws_auth_token(token, max_age=43200):
         data = serializer.loads(token, salt=WS_AUTH_SALT, max_age=max_age)
     except (BadSignature, SignatureExpired, TypeError, ValueError):
         return None
-    if str(data.get("id", "")) != DISCORD_OWNER_ID:
-        return None
-    return {
+    user = {
         "id": str(data.get("id", "")),
         "username": data.get("username", ""),
         "global_name": data.get("global_name", ""),
     }
+    if not dashboard_user_is_owner(user):
+        return None
+    return user
 
 
 def command_access_denied(feature_name):
     return (
-        f"{ASSISTANT_NAME} reste neutre tant que le compte Discord proprietaire n'est pas connecte. "
-        f"L'acces a {feature_name} est reserve au proprietaire autorise."
+        f"{ASSISTANT_NAME} reste neutre tant que le dashboard n'est pas connecte. "
+        f"L'acces a {feature_name} est reserve au compte administrateur."
     )
 
 
@@ -7838,15 +7981,16 @@ def start_http_interface_server():
 
     @app.get("/api/auth/status")
     def auth_status():
-        user = session.get("discord_user")
+        user = session.get("dashboard_user")
         owner_authenticated = is_owner_authenticated()
         return jsonify({
             "authenticated": owner_authenticated,
             "user": user if owner_authenticated else None,
             "assistant_name": ASSISTANT_NAME,
-            "login_url": "/auth/discord/login",
+            "login_url": "/auth/login",
             "logout_url": "/auth/logout",
             "discord_configured": DISCORD_CONFIGURED,
+            "local_auth": True,
             "config_flags": get_service_config_flags(),
             "service_health": get_service_health_flags(),
             "ws_auth_token": issue_ws_auth_token(user) if owner_authenticated else "",
@@ -7900,7 +8044,7 @@ def start_http_interface_server():
             return jsonify({"error": "empty_text"}), 400
         client_id = str(payload.get("client_id", "")).strip() or ensure_http_client_id()
         session["jarvis_client_id"] = client_id
-        user = session.get("discord_user") if is_owner_authenticated() else None
+        user = session.get("dashboard_user") if is_owner_authenticated() else None
         threading.Thread(
             target=lambda: asyncio.run(traiter_reponse_ia(texte, auth_user=user, http_client_id=client_id)),
             daemon=True,
@@ -7996,6 +8140,8 @@ def start_http_interface_server():
         if not updates:
             return jsonify({"error": "no_changes"}), 400
         save_runtime_settings(updates)
+        if is_owner_authenticated():
+            session["dashboard_user"] = {"id": "local", "username": str(DASHBOARD_USERNAME or "admin")}
         if app is not None:
             app.secret_key = JARVIS_SESSION_SECRET or app.secret_key
         return jsonify({
@@ -8017,83 +8163,20 @@ def start_http_interface_server():
             "lines": get_debug_log_snapshot(limit),
         })
 
-    @app.get("/auth/discord/login")
-    def auth_discord_login():
-        if not DISCORD_CONFIGURED:
-            return redirect("/?error=discord_non_configure")
-
-        state = secrets.token_urlsafe(24)
-        redirect_uri = discord_redirect_uri_for_request()
-        session["discord_oauth_state"] = state
-        session["discord_redirect_uri"] = redirect_uri
-        params = {
-            "client_id": DISCORD_CLIENT_ID,
-            "response_type": "code",
-            "redirect_uri": redirect_uri,
-            "scope": "identify",
-            "state": state,
-            "prompt": "consent",
-        }
-        query = "&".join(
-            f"{key}={requests.utils.quote(str(value), safe='')}"
-            for key, value in params.items()
-        )
-        return redirect(f"https://discord.com/oauth2/authorize?{query}")
-
-    @app.get("/auth/discord/callback")
-    def auth_discord_callback():
-        if not DISCORD_CONFIGURED:
-            return redirect("/?error=discord_non_configure")
-
-        state = flask_request.args.get("state", "")
-        code = flask_request.args.get("code", "")
-        expected_state = session.get("discord_oauth_state")
-        redirect_uri = session.get("discord_redirect_uri") or discord_redirect_uri_for_request()
-        if not state or state != expected_state or not code:
-            session.clear()
-            return redirect("/?error=discord_state_invalide")
-
-        try:
-            token_response = requests.post(
-                "https://discord.com/api/oauth2/token",
-                data={
-                    "client_id": DISCORD_CLIENT_ID,
-                    "client_secret": DISCORD_CLIENT_SECRET,
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=10,
-            )
-            token_response.raise_for_status()
-            access_token = token_response.json().get("access_token")
-            user_response = requests.get(
-                "https://discord.com/api/users/@me",
-                headers={"Authorization": f"Bearer {access_token}"},
-                timeout=10,
-            )
-            user_response.raise_for_status()
-            user_data = user_response.json()
-        except Exception as e:
-            session.clear()
-            print(f"[DISCORD] OAuth erreur : {e}")
-            return redirect("/?error=discord_oauth_echec")
-
-        if str(user_data.get("id")) != DISCORD_OWNER_ID:
-            session.clear()
-            return redirect("/?error=discord_acces_refuse")
-
-        session["discord_user"] = {
-            "id": str(user_data.get("id", "")),
-            "username": user_data.get("username", ""),
-            "global_name": user_data.get("global_name", ""),
-        }
-        return redirect("/?dashboard=1")
+    @app.post("/auth/login")
+    def auth_login():
+        payload = flask_request.get_json(silent=True) or {}
+        username = str(payload.get("username") or "").strip()
+        password = str(payload.get("password") or "")
+        if not dashboard_password_valid(username, password):
+            return jsonify({"error": "invalid_credentials"}), 401
+        session["dashboard_user"] = {"id": "local", "username": str(DASHBOARD_USERNAME or "admin")}
+        return jsonify({"ok": True, "user": session["dashboard_user"]})
 
     @app.get("/auth/logout")
     def auth_logout():
-        session.clear()
+        session.pop("dashboard_user", None)
+        session.pop("discord_user", None)
         return redirect("/")
 
     @app.get("/assets/<path:filename>")

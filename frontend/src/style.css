@@ -1014,6 +1014,30 @@ body.dashboard-open {
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
 }
 
+#dashboard-login-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+#dashboard-login-form input {
+  min-height: 44px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(242, 248, 255, 0.94);
+  font-size: 13px;
+}
+
+#dashboard-login-form input:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.72);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
+}
+
 #dashboard-actions {
   position: sticky;
   bottom: 0;
@@ -1026,6 +1050,7 @@ body.dashboard-open {
   background: linear-gradient(to top, rgba(5, 10, 18, 1), rgba(5, 10, 18, 0));
 }
 
+#dashboard-login-form button,
 #dashboard-actions button {
   min-height: 44px;
   padding: 11px 16px;
@@ -1039,19 +1064,21 @@ body.dashboard-open {
   transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, opacity 0.2s ease;
 }
 
+#dashboard-login-form button:hover,
 #dashboard-actions button:hover {
   transform: translateY(-1px);
   border-color: rgba(125, 211, 252, 0.34);
 }
 
+#dashboard-login-form button:disabled,
 #dashboard-actions button:disabled {
   opacity: 0.55;
   cursor: wait;
 }
 
 #dashboard-login {
-  background: rgba(88, 101, 242, 0.2);
-  border-color: rgba(88, 101, 242, 0.34);
+  background: rgba(14, 165, 233, 0.22);
+  border-color: rgba(14, 165, 233, 0.34);
 }
 
 #dashboard-logout {
@@ -1240,7 +1267,8 @@ body.dashboard-open {
     justify-content: stretch;
   }
 
-  #dashboard-actions button {
+  #dashboard-login-form button,
+#dashboard-actions button {
     flex: 1 1 100%;
   }
 }
@@ -1492,6 +1520,10 @@ body.dashboard-open {
     border-radius: 16px;
   }
 
+  #dashboard-login-form {
+    grid-template-columns: 1fr;
+  }
+
   #dashboard-actions {
     bottom: calc(env(safe-area-inset-bottom, 0px) * -1);
     margin-inline: -14px;
@@ -1499,7 +1531,8 @@ body.dashboard-open {
     justify-content: stretch;
   }
 
-  #dashboard-actions button {
+  #dashboard-login-form button,
+#dashboard-actions button {
     flex: 1 1 100%;
     min-height: 48px;
   }
