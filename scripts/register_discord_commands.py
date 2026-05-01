@@ -11,6 +11,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 SETTINGS_FILE = BASE_DIR / "jarvis_runtime_settings.json"
 SUMMARY_COMMAND_NAME = "Resumer avec J.A.R.V.I.S"
 FILE_ANALYSIS_COMMAND_NAME = "analyser-fichier"
+FILE_CONTEXT_COMMAND_NAME = "Verifier avec J.A.R.V.I.S"
 API_BASE = "https://discord.com/api/v10"
 
 
@@ -67,6 +68,12 @@ def main():
                 }
             ],
         },
+        {
+            "name": FILE_CONTEXT_COMMAND_NAME,
+            "type": 3,
+            "integration_types": [0, 1],
+            "contexts": [0, 1, 2],
+        },
     ]
     commands_url = f"{API_BASE}/applications/{application_id}/commands"
     commands = discord_request("GET", commands_url, bot_token)
@@ -88,6 +95,7 @@ def main():
     print("  https://TON_DOMAINE/api/discord/interactions")
     print("Ensuite:")
     print("  - clic droit sur un message -> Applications -> Resumer avec J.A.R.V.I.S")
+    print("  - clic droit sur un message avec fichier -> Applications -> Verifier avec J.A.R.V.I.S")
     print("  - /analyser-fichier fichier:<piece jointe> pour une analyse statique prudente")
 
 

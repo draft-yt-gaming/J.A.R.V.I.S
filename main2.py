@@ -95,6 +95,7 @@ DISCORD_SUMMARY_CACHE = {}
 DISCORD_SUMMARY_CACHE_LOCK = threading.Lock()
 DISCORD_SUMMARY_CACHE_TTL = 15 * 60
 DISCORD_FILE_ANALYSIS_COMMAND_NAME = "analyser-fichier"
+DISCORD_FILE_CONTEXT_COMMAND_NAME = "Verifier avec J.A.R.V.I.S"
 
 
 class DebugTeeStream:
@@ -1665,15 +1666,31 @@ async def explain_discord_file_analysis(static_report):
     return report
 
 
+def extract_discord_file_analysis_attachment(payload):
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    command_type = data.get("type") if isinstance(data, dict) else None
+    if command_type == 1:
+        return extract_discord_slash_attachment(payload), "Ajoute un fichier a l'option `fichier` pour que J.A.R.V.I.S puisse l'analyser."
+
+    target = extract_discord_target_message(payload)
+    attachments = target.get("attachments", [])
+    if not attachments:
+        return {}, "Ce message ne contient aucune piece jointe a verifier."
+    for attachment in attachments:
+        if isinstance(attachment, dict):
+            return attachment, ""
+    return {}, "Je n'ai pas trouve de piece jointe exploitable dans ce message."
+
+
 async def process_discord_file_analysis_async(payload):
     file_path = None
     static_report = ""
     filename = "analyse-fichier-jarvis.txt"
     try:
-        attachment = extract_discord_slash_attachment(payload)
+        attachment, missing_message = extract_discord_file_analysis_attachment(payload)
         filename = str(attachment.get("filename") or filename) if attachment else filename
         if not attachment:
-            result = "Ajoute un fichier a l'option `fichier` pour que J.A.R.V.I.S puisse l'analyser."
+            result = missing_message or "Je n'ai pas trouve de fichier a analyser."
         else:
             size = int(attachment.get("size") or 0)
             if size > 25 * 1024 * 1024:
@@ -7781,7 +7798,9 @@ def start_http_interface_server():
         data = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
         command_type = data.get("type")
         if interaction_type == 2 and command_type == 3:
-            threading.Thread(target=process_discord_message_summary, args=(payload,), daemon=True).start()
+            command_name = str(data.get("name") or "")
+            target = process_discord_file_analysis if command_name == DISCORD_FILE_CONTEXT_COMMAND_NAME else process_discord_message_summary
+            threading.Thread(target=target, args=(payload,), daemon=True).start()
             return jsonify({
                 "type": 5,
                 "data": {"flags": 64},
