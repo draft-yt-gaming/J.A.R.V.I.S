@@ -95,6 +95,7 @@ DISCORD_SUMMARY_CACHE = {}
 DISCORD_SUMMARY_CACHE_LOCK = threading.Lock()
 DISCORD_SUMMARY_CACHE_TTL = 15 * 60
 DISCORD_FILE_CONTEXT_COMMAND_NAME = "Verifier avec J.A.R.V.I.S"
+DISCORD_FILE_ANALYSIS_MAX_MB = 500
 
 
 class DebugTeeStream:
@@ -1417,6 +1418,25 @@ def inspect_pdf_sample(sample):
     }
 
 
+def read_file_prefix(path, limit):
+    with open(path, "rb") as f:
+        return f.read(limit)
+
+
+def hash_file_stream(path):
+    hashers = {
+        "MD5": hashlib.md5(),
+        "SHA-1": hashlib.sha1(),
+        "SHA-256": hashlib.sha256(),
+        "BLAKE2b-256": hashlib.blake2b(digest_size=32),
+    }
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            for hasher in hashers.values():
+                hasher.update(chunk)
+    return {name: hasher.hexdigest() for name, hasher in hashers.items()}
+
+
 def lookup_virustotal_file_hash(sha256):
     if not env_value_is_configured(VIRUSTOTAL_API_KEY):
         return "VirusTotal: non configure (VIRUSTOTAL_API_KEY manquante). Recherche par hash ignoree."
@@ -1463,18 +1483,12 @@ def static_analyze_discord_file(path, attachment):
     filename = str(attachment.get("filename") or Path(path).name or "fichier")
     declared_type = str(attachment.get("content_type") or "inconnu")
     size = Path(path).stat().st_size
-    data = Path(path).read_bytes()
-    sample = data[:512 * 1024]
-    hashes = {
-        "MD5": hashlib.md5(data).hexdigest(),
-        "SHA-1": hashlib.sha1(data).hexdigest(),
-        "SHA-256": hashlib.sha256(data).hexdigest(),
-        "BLAKE2b-256": hashlib.blake2b(data, digest_size=32).hexdigest(),
-    }
+    sample = read_file_prefix(path, 1024 * 1024)
+    hashes = hash_file_stream(path)
     signature = detect_file_signature(sample[:64], filename=filename)
     lower_name = filename.lower()
     suffix = Path(lower_name).suffix or "aucune"
-    entropy = shannon_entropy(data[:1024 * 1024])
+    entropy = shannon_entropy(sample)
     text_profile = detect_text_profile(sample)
     indicators = extract_file_indicators(sample)
     executable_suffixes = {
@@ -1500,8 +1514,8 @@ def static_analyze_discord_file(path, attachment):
         warnings.append("Entropie elevee sur un executable: possible packer, compression ou chiffrement.")
 
     zip_report = None
-    pe_info = parse_pe_info(data) if sample.startswith(b"MZ") else {}
-    elf_info = parse_elf_info(data) if sample.startswith(b"\x7fELF") else {}
+    pe_info = parse_pe_info(sample) if sample.startswith(b"MZ") else {}
+    elf_info = parse_elf_info(sample) if sample.startswith(b"\x7fELF") else {}
     pdf_info = inspect_pdf_sample(sample) if sample.startswith(b"%PDF") else {}
     if sample.startswith(b"PK\x03\x04"):
         zip_report = inspect_zip_safely(path)
@@ -1688,10 +1702,10 @@ async def process_discord_file_analysis_async(payload):
             result = missing_message or "Je n'ai pas trouve de fichier a analyser."
         else:
             size = int(attachment.get("size") or 0)
-            if size > 25 * 1024 * 1024:
-                result = "Fichier trop gros pour l'analyse statique Discord: limite 25 Mo."
+            if size > DISCORD_FILE_ANALYSIS_MAX_MB * 1024 * 1024:
+                result = f"Fichier trop gros pour l'analyse statique Discord: limite {DISCORD_FILE_ANALYSIS_MAX_MB} Mo."
             else:
-                file_path = download_discord_media_attachment(attachment, prefix="discord_file_scan", max_size_mb=25)
+                file_path = download_discord_media_attachment(attachment, prefix="discord_file_scan", max_size_mb=DISCORD_FILE_ANALYSIS_MAX_MB)
                 if not file_path:
                     result = "Je n'ai pas pu telecharger ce fichier pour l'analyser."
                 else:
